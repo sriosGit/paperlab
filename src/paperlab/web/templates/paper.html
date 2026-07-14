@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ p['title'] }} — paperlab{% endblock %}
+{% block content %}
+<p><a href="/">← Biblioteca</a></p>
+<h1>{{ p['title'] }}</h1>
+<p class="meta">
+  {{ (p['authors'] | fromjson) | join(', ') }}<br>
+  {{ p['year'] or 's.f.' }} · {{ p['venue'] or '—' }} · fuente: {{ p['source'] }}
+  · <span class="tag tag-{{ p['status'] }}">{{ p['status'] }}</span>
+  · {{ n_chunks }} chunks indexados
+</p>
+<p>
+  {% if p['url'] %}<a href="{{ p['url'] }}" target="_blank">página del artículo ↗</a>{% endif %}
+  {% if p['doi'] %} · <a href="https://doi.org/{{ p['doi'] }}" target="_blank">doi:{{ p['doi'] }}</a>{% endif %}
+  {% if p['pdf_path'] %} · PDF descargado{% elif p['pdf_url'] %} · <a href="{{ p['pdf_url'] }}" target="_blank">PDF ↗</a>{% endif %}
+</p>
+
+{% if p['abstract'] %}
+<h2>Abstract</h2>
+<p>{{ p['abstract'] }}</p>
+{% endif %}
+
+<h2>Análisis</h2>
+<div id="summary">
+  {% include "_summary.html" %}
+</div>
+{% endblock %}

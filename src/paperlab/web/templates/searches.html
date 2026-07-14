@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Búsquedas — paperlab{% endblock %}
+{% block content %}
+<h1>Búsquedas guardadas</h1>
+{% if msg %}<p class="ok">{{ msg }}</p>{% endif %}
+
+<table>
+  <thead><tr><th>Nombre</th><th>Query</th><th>Fuentes</th><th>Máx.</th><th>Última ejecución</th><th></th></tr></thead>
+  <tbody>
+    {% for s in searches %}
+    <tr>
+      <td>{{ s['name'] }}</td>
+      <td><code>{{ s['query'] }}</code></td>
+      <td>{{ s['sources'] }}</td>
+      <td>{{ s['max_results'] }}</td>
+      <td>{{ s['last_run_at'] or 'nunca' }}</td>
+      <td>
+        <form method="post" action="/searches/{{ s['id'] }}/run" style="display:inline">
+          <button>▶ Ejecutar</button>
+        </form>
+        <form method="post" action="/searches/{{ s['id'] }}/delete" style="display:inline"
+              onsubmit="return confirm('¿Borrar esta búsqueda?')">
+          <button class="danger">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">Sin búsquedas guardadas todavía.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Nueva búsqueda</h2>
+<form method="post" action="/searches" class="stack">
+  <input name="name" placeholder="Nombre (p. ej. AlphaFold y plegado de proteínas)" required>
+  <input name="query" placeholder="Query (p. ej. protein structure prediction)" required>
+  <input name="sources" value="arxiv,openalex">
+  <input name="max_results" type="number" value="50" min="1" max="500">
+  <button type="submit">Guardar</button>
+</form>
+<p class="meta">Tras ejecutar una búsqueda, usa «⚙ Procesar pendientes» en la Biblioteca para descargar PDFs, indexar y calcular embeddings.</p>
+{% endblock %}

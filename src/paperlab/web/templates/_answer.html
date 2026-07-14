@@ -1,0 +1,16 @@
+<div class="answer">
+  <p class="question">❓ {{ question }}</p>
+  {% if error %}
+  <p class="warn">⚠ {{ error }}</p>
+  {% else %}
+  <div>{{ answer.text | markdown | safe }}</div>
+  {% if answer.sources %}
+  <h4>Fuentes</h4>
+  <ol>
+    {% for s in answer.sources %}
+    <li value="{{ s.n }}"><a href="/paper/{{ s.paper_id }}">{{ s.title }}</a> ({{ s.year or 's.f.' }})</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  {% endif %}
+</div>

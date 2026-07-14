@@ -1,0 +1,19 @@
+{% if error %}<p class="warn">⚠ {{ error }}</p>{% endif %}
+{% if summary %}
+<div class="summary">
+  <div>{{ summary['summary_md'] | markdown | safe }}</div>
+  {% set findings = summary['findings'] | fromjson %}
+  {% if findings %}
+  <h3>Hallazgos clave</h3>
+  <ul>{% for f in findings %}<li>{{ f }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if summary['method'] %}<h3>Método</h3><p>{{ summary['method'] }}</p>{% endif %}
+  {% if summary['limitations'] %}<h3>Limitaciones</h3><p>{{ summary['limitations'] }}</p>{% endif %}
+  {% if summary['relevance'] %}<h3>Relevancia</h3><p>{{ summary['relevance'] }}</p>{% endif %}
+  <p class="meta">modelo: {{ summary['model'] }} · {{ summary['created_at'] }}</p>
+</div>
+{% else %}
+<button hx-post="/paper/{{ p['id'] }}/summarize" hx-target="#summary" hx-swap="innerHTML"
+        hx-indicator="#sum-spin">📝 Generar resumen</button>
+<span id="sum-spin" class="htmx-indicator">⏳ generando (puede tardar 1-2 min)…</span>
+{% endif %}

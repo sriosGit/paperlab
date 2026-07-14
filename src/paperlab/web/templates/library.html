@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Biblioteca — paperlab{% endblock %}
+{% block content %}
+<h1>Biblioteca <small>{{ counts.total }} papers</small></h1>
+
+{% if not ollama_ok %}
+<p class="warn">⚠ Ollama no responde — los resúmenes, embeddings y chat no funcionarán hasta que esté disponible.</p>
+{% endif %}
+
+<form method="get" class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="Buscar en títulos y abstracts…">
+  <select name="source">
+    <option value="">— fuente —</option>
+    {% for s in counts.sources %}
+    <option value="{{ s['source'] }}" {% if source == s['source'] %}selected{% endif %}>{{ s['source'] }} ({{ s['n'] }})</option>
+    {% endfor %}
+  </select>
+  <select name="status">
+    <option value="">— estado —</option>
+    {% for s in counts.statuses %}
+    <option value="{{ s['status'] }}" {% if status == s['status'] %}selected{% endif %}>{{ s['status'] }} ({{ s['n'] }})</option>
+    {% endfor %}
+  </select>
+  <input type="number" name="year" value="{{ year }}" placeholder="año" style="width:6em">
+  <button type="submit">Filtrar</button>
+</form>
+
+<div class="actions">
+  <button hx-post="/jobs/process" hx-target="#job" hx-swap="innerHTML">⚙ Procesar pendientes</button>
+  <button hx-post="/jobs/summarize" hx-target="#job" hx-swap="innerHTML">📝 Resumir pendientes</button>
+</div>
+<div id="job">{% include "_job.html" %}</div>
+
+<table>
+  <thead>
+    <tr><th>Título</th><th>Año</th><th>Fuente</th><th>Estado</th><th>Resumen</th></tr>
+  </thead>
+  <tbody>
+    {% for p in papers %}
+    <tr>
+      <td><a href="/paper/{{ p['id'] }}">{{ p['title'] }}</a></td>
+      <td>{{ p['year'] or '—' }}</td>
+      <td>{{ p['source'] }}</td>
+      <td><span class="tag tag-{{ p['status'] }}">{{ p['status'] }}</span></td>
+      <td>{{ '✓' if p['has_summary'] else '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No hay papers. Crea una <a href="/searches">búsqueda</a> o usa el CLI: <code>paperlab search "tu tema"</code></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

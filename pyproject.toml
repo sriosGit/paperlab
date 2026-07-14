@@ -1,0 +1,32 @@
+[project]
+name = "paperlab"
+version = "0.1.0"
+description = "Recopilador y analizador local-first de artículos científicos (Ollama + FastAPI)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "pymupdf>=1.24",
+    "feedparser>=6.0",
+    "numpy>=1.26",
+    "python-multipart>=0.0.9",
+    "markdown>=3.6",
+]
+
+[project.scripts]
+paperlab = "paperlab.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"paperlab.web" = ["templates/*.html", "static/*"]

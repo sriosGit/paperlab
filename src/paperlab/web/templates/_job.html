@@ -1,0 +1,6 @@
+{% if job.running or job.log %}
+<div class="job" {% if job.running %}hx-get="/jobs/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <strong>{{ job.name }}</strong> {% if job.running %}<span class="spinner">⏳ en curso…</span>{% endif %}
+  <pre>{{ job.log | join('\n') }}</pre>
+</div>
+{% endif %}

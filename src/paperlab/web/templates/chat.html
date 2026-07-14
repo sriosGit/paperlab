@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Chat — paperlab{% endblock %}
+{% block content %}
+<h1>Chat con tu corpus</h1>
+{% if not ollama_ok %}
+<p class="warn">⚠ Ollama no responde — el chat no funcionará hasta que esté disponible.</p>
+{% endif %}
+<form hx-post="/chat/ask" hx-target="#answers" hx-swap="afterbegin" hx-indicator="#chat-spin"
+      hx-on::after-request="if(event.detail.successful) this.reset()">
+  <textarea name="question" rows="3" required
+            placeholder="p. ej. ¿Qué métodos de predicción de estructura de proteínas aparecen en el corpus?"></textarea>
+  <button type="submit">Preguntar</button>
+  <span id="chat-spin" class="htmx-indicator">⏳ pensando (puede tardar 1-2 min)…</span>
+</form>
+<div id="answers"></div>
+{% endblock %}
