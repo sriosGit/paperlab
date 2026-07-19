@@ -15,7 +15,10 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "")
 
 DATA_DIR = Path(os.environ.get("PAPERLAB_DATA_DIR", "data")).resolve()
-PDF_DIR = DATA_DIR / "pdfs"
+# Los PDFs pueden vivir aparte (p. ej. en un NAS montado por SMB); la base
+# SQLite se queda siempre en DATA_DIR local — WAL sobre red no es fiable.
+_pdf_dir = os.environ.get("PAPERLAB_PDF_DIR")
+PDF_DIR = Path(_pdf_dir).expanduser().resolve() if _pdf_dir else DATA_DIR / "pdfs"
 DB_PATH = DATA_DIR / "paperlab.db"
 
 USER_AGENT = f"paperlab/0.1 (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else "paperlab/0.1"

@@ -26,10 +26,41 @@ def search(
 
 
 @app.command(name="fetch-pdfs")
-def fetch_pdfs(limit: int = typer.Option(None, help="Máximo de PDFs a descargar")):
-    """Descarga los PDFs de los papers pendientes (arXiv directo, Unpaywall por DOI)."""
+def fetch_pdfs(
+    limit: int = typer.Option(None, help="Máximo de PDFs a descargar"),
+    retry: bool = typer.Option(False, "--retry", help="Reintenta todo paper sin PDF (no solo los 'new')"),
+):
+    """Descarga PDFs: URL guardada → arXiv → Unpaywall → Semantic Scholar."""
     conn = db.get_conn()
-    typer.echo(json.dumps(pdf_mod.fetch_pdfs(conn, limit), ensure_ascii=False))
+    typer.echo(json.dumps(pdf_mod.fetch_pdfs(conn, limit, retry=retry), ensure_ascii=False))
+
+
+@app.command(name="relocate-pdfs")
+def relocate_pdfs():
+    """Mueve los PDFs descargados al directorio actual (PAPERLAB_PDF_DIR) y actualiza rutas."""
+    import shutil
+
+    conn = db.get_conn()
+    config.ensure_dirs()
+    rows = conn.execute("SELECT id, pdf_path FROM papers WHERE pdf_path IS NOT NULL").fetchall()
+    movidos = en_sitio = perdidos = 0
+    for row in rows:
+        actual = Path(row["pdf_path"])
+        destino = config.PDF_DIR / actual.name
+        if actual == destino:
+            en_sitio += 1
+            continue
+        if actual.exists():
+            shutil.move(str(actual), destino)
+        elif not destino.exists():
+            typer.echo(f"  paper {row['id']}: PDF perdido ({actual})", err=True)
+            perdidos += 1
+            continue
+        conn.execute("UPDATE papers SET pdf_path = ? WHERE id = ?", (str(destino), row["id"]))
+        movidos += 1
+    conn.commit()
+    typer.echo(f"destino: {config.PDF_DIR}")
+    typer.echo(f"movidos: {movidos} · ya en sitio: {en_sitio} · perdidos: {perdidos}")
 
 
 @app.command()

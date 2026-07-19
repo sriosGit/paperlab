@@ -24,7 +24,8 @@ cp .env.example .env   # edita CONTACT_EMAIL (OpenAlex/Unpaywall lo piden)
 
 ```sh
 paperlab search "protein structure prediction" --source arxiv,openalex --limit 30
-paperlab fetch-pdfs          # descarga PDFs (arXiv directo; Unpaywall por DOI)
+paperlab fetch-pdfs          # PDFs: URL guardada → arXiv → Unpaywall → Semantic Scholar
+paperlab fetch-pdfs --retry  # reintenta todo paper sin PDF (re-indexa al conseguirlo)
 paperlab process             # extrae texto, trocea, indexa FTS5 y calcula embeddings
 paperlab summarize --limit 5 # resúmenes estructurados con el LLM
 paperlab ask "¿qué métodos usan estos papers?"
@@ -71,6 +72,22 @@ venv (`mise install && mise use`), aunque cualquier 3.11+ funciona.
 > Para desarrollar desde otra máquina de la tailnet usando el Ollama de la Mac,
 > en la Mac ejecuta `launchctl setenv OLLAMA_HOST 0.0.0.0` y reinicia Ollama;
 > en la otra máquina pon `OLLAMA_BASE_URL=http://mb-2022:11434` en `.env`.
+
+## PDFs en el NAS
+
+Los PDFs pueden vivir en el NAS sin mover la base de datos:
+
+1. Monta el share por SMB (Finder → ⌘K → `smb://<nas>/<share>`, o `mount_smbfs`).
+   Queda en `/Volumes/<share>`.
+2. En `.env`: `PAPERLAB_PDF_DIR=/Volumes/<share>/paperlab-pdfs`.
+3. `paperlab relocate-pdfs` mueve los PDFs ya descargados y actualiza las rutas.
+
+La base SQLite **se queda local** (`PAPERLAB_DATA_DIR`): SQLite en modo WAL
+sobre SMB/NFS corrompe con facilidad. Los PDFs en cambio son archivos que se
+escriben una vez, ideales para el NAS. Si el share no está montado, `process`
+no podrá extraer texto de esos PDFs hasta que vuelva a estarlo (los ya
+indexados no se ven afectados: el texto vive en la base). Backup completo =
+copiar `data/` + la carpeta de PDFs del NAS.
 
 ## Notas de recursos (Mac de 16 GB)
 
