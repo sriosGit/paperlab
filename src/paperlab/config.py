@@ -20,6 +20,9 @@ DB_PATH = DATA_DIR / "paperlab.db"
 
 USER_AGENT = f"paperlab/0.1 (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else "paperlab/0.1"
 
+_vault = os.environ.get("OBSIDIAN_VAULT_PATH")
+OBSIDIAN_VAULT_PATH = Path(_vault).expanduser().resolve() if _vault else None
+
 
 def ensure_dirs() -> None:
     PDF_DIR.mkdir(parents=True, exist_ok=True)

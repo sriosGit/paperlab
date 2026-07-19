@@ -1,10 +1,11 @@
 """CLI de paperlab (typer)."""
 
 import json
+from pathlib import Path
 
 import typer
 
-from . import analyze, db, llm
+from . import analyze, config, db, llm
 from . import pdf as pdf_mod
 from .ingest import run_search
 
@@ -140,6 +141,33 @@ def enrich_openalex(limit: int = typer.Option(None, help="Máximo de papers a en
         f"enriquecidos: {enriquecidos} · sin match/error: {fallidos} · "
         f"citas nuevas: {citas_despues - citas_antes}"
     )
+
+
+@app.command(name="export-obsidian")
+def export_obsidian(
+    vault: Path = typer.Option(None, help="Carpeta del vault (por defecto $OBSIDIAN_VAULT_PATH)"),
+    prune: bool = typer.Option(False, help="Borra notas de papers que ya no están en la BD"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Muestra qué haría sin escribir"),
+):
+    """Exporta la biblioteca al vault de Obsidian (notas, wikilinks de citas y MOCs)."""
+    from .export import obsidian
+
+    destino = vault or config.OBSIDIAN_VAULT_PATH
+    if destino is None:
+        typer.echo("ERROR: define OBSIDIAN_VAULT_PATH en .env o pasa --vault", err=True)
+        raise typer.Exit(1)
+    conn = db.get_conn()
+    s = obsidian.export_vault(conn, destino, prune=prune, dry_run=dry_run)
+    prefijo = "[dry-run] " if dry_run else ""
+    typer.echo(
+        f"{prefijo}papers: {s['notas']} · MOCs: {s['mocs']} · "
+        f"archivos nuevos {s['nuevas']}, actualizados {s['actualizadas']}, "
+        f"sin cambios {s['sin_cambios']}, renombrados {s['renombradas']} · "
+        f"citas locales: {s['citas_locales']} · refs externas: {s['refs_externas']} · "
+        f"huérfanas: {len(s['huerfanas'])} · podadas: {s['podadas']}"
+    )
+    for h in s["huerfanas"]:
+        typer.echo(f"  huérfana (usa --prune para borrar): {h}")
 
 
 @app.command()

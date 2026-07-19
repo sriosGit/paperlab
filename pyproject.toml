@@ -18,6 +18,9 @@ dependencies = [
     "markdown>=3.6",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 paperlab = "paperlab.cli:app"
 
