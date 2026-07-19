@@ -252,6 +252,25 @@ def export_obsidian(
         typer.echo(f"  huérfana (usa --prune para borrar): {h}")
 
 
+@app.command(name="sync-nas")
+def sync_nas(
+    restore: bool = typer.Option(False, "--restore", help="Además, baja del NAS los PDFs que falten en disco"),
+):
+    """Respalda los PDFs en el NAS (SRC Cloud) vía WebDAV; con --restore también recupera."""
+    from . import nas
+
+    conn = db.get_conn()
+    try:
+        r = nas.sync_pdfs(conn, restore=restore, progress=typer.echo)
+    except nas.NasError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(
+        f"subidos: {r['subidos']} · ya en NAS: {r['ya_en_nas']} · "
+        f"recuperados: {r['recuperados']} · perdidos: {r['perdidos']}"
+    )
+
+
 @app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", help="Interfaz de escucha"),

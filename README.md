@@ -29,6 +29,7 @@ paperlab fetch-pdfs --retry  # reintenta todo paper sin PDF (re-indexa al conseg
 paperlab process             # extrae texto, trocea, indexa FTS5 y calcula embeddings
 paperlab summarize --limit 5 # resúmenes estructurados con el LLM
 paperlab ask "¿qué métodos usan estos papers?"
+paperlab sync-nas            # respalda los PDFs en el NAS (SRC Cloud) vía WebDAV
 paperlab synthesize "protein folding"   # análisis transversal: compara papers entre sí
 paperlab synthesize --full              # todo el corpus por lotes (map-reduce); tarda ~2 min por lote
 paperlab synthesize --list              # síntesis guardadas; --show N para releer una
@@ -73,21 +74,32 @@ venv (`mise install && mise use`), aunque cualquier 3.11+ funciona.
 > en la Mac ejecuta `launchctl setenv OLLAMA_HOST 0.0.0.0` y reinicia Ollama;
 > en la otra máquina pon `OLLAMA_BASE_URL=http://mb-2022:11434` en `.env`.
 
-## PDFs en el NAS
+## PDFs en el NAS (SRC Cloud)
 
-Los PDFs pueden vivir en el NAS sin mover la base de datos:
+paperlab respalda los PDFs en el NAS personal ([SRC Cloud](../src-cloud))
+hablando con su **API WebDAV** (`/dav/...`, Basic auth) — no hace falta montar
+nada. En `.env`:
 
-1. Monta el share por SMB (Finder → ⌘K → `smb://<nas>/<share>`, o `mount_smbfs`).
-   Queda en `/Volumes/<share>`.
-2. En `.env`: `PAPERLAB_PDF_DIR=/Volumes/<share>/paperlab-pdfs`.
-3. `paperlab relocate-pdfs` mueve los PDFs ya descargados y actualiza las rutas.
+```sh
+NAS_BASE_URL=http://localhost:8000   # backend FastAPI del SRC Cloud
+NAS_USERNAME=tu-usuario              # tu usuario del NAS
+NAS_PASSWORD=tu-contraseña
+NAS_PDF_DIR=paperlab/pdfs            # carpeta dentro de tu espacio del NAS
+```
 
-La base SQLite **se queda local** (`PAPERLAB_DATA_DIR`): SQLite en modo WAL
-sobre SMB/NFS corrompe con facilidad. Los PDFs en cambio son archivos que se
-escriben una vez, ideales para el NAS. Si el share no está montado, `process`
-no podrá extraer texto de esos PDFs hasta que vuelva a estarlo (los ya
-indexados no se ven afectados: el texto vive en la base). Backup completo =
-copiar `data/` + la carpeta de PDFs del NAS.
+- `paperlab sync-nas` (o el botón «☁ PDFs al NAS» de la Biblioteca) sube los
+  PDFs locales que falten en el NAS; es idempotente.
+- `paperlab sync-nas --restore` además baja del NAS los que falten en disco
+  (p. ej. tras clonar el repo en otra máquina).
+
+El modelo es local-first: los PDFs se leen siempre del disco local y el NAS es
+archivo/respaldo, así que `process` funciona aunque el NAS esté apagado. La
+base SQLite se queda local (`PAPERLAB_DATA_DIR`) y los PDFs aparecen en el
+explorador del SRC Cloud como archivos normales. Backup completo = copiar
+`data/` (el NAS ya guarda los PDFs).
+
+> Alternativa sin API: montar un share por SMB y apuntar `PAPERLAB_PDF_DIR`
+> al punto de montaje (`paperlab relocate-pdfs` migra los ya descargados).
 
 ## Notas de recursos (Mac de 16 GB)
 

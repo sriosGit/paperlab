@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, config, db, llm, synthesize
+from .. import analyze, config, db, llm, nas, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -111,6 +111,15 @@ def _enrich_openalex():
     )
 
 
+def _sync_nas():
+    conn = db.get_conn()
+    _log(f"sincronizando PDFs con el NAS ({config.NAS_BASE_URL})…")
+    r = nas.sync_pdfs(conn, progress=_log)
+    _log(
+        f"subidos: {r['subidos']} · ya en NAS: {r['ya_en_nas']} · perdidos: {r['perdidos']}"
+    )
+
+
 def _export_obsidian():
     from ..export import obsidian
 
@@ -167,7 +176,7 @@ def library(request: Request, q: str = "", source: str = "", year: str = "", sta
         request, "library.html",
         {"papers": papers, "counts": counts, "q": q, "source": source,
          "year": year, "status": status, "job": job, "ollama_ok": llm.is_available(),
-         "obsidian_vault": config.OBSIDIAN_VAULT_PATH},
+         "obsidian_vault": config.OBSIDIAN_VAULT_PATH, "nas_ok": nas.enabled()},
     )
 
 
@@ -348,6 +357,12 @@ def start_enrich(request: Request):
 @app.post("/jobs/export-obsidian", response_class=HTMLResponse)
 def start_export_obsidian(request: Request):
     _run_job("exportar a Obsidian", _export_obsidian)
+    return templates.TemplateResponse(request, "_job.html", {"job": job})
+
+
+@app.post("/jobs/sync-nas", response_class=HTMLResponse)
+def start_sync_nas(request: Request):
+    _run_job("respaldar PDFs en el NAS", _sync_nas)
     return templates.TemplateResponse(request, "_job.html", {"job": job})
 
 

@@ -36,6 +36,12 @@
   {% else %}
   <button disabled title="Define OBSIDIAN_VAULT_PATH en .env para activar el export">🗂 Exportar a Obsidian</button>
   {% endif %}
+  {% if nas_ok %}
+  <button hx-post="/jobs/sync-nas" hx-target="#job" hx-swap="innerHTML"
+          title="Sube al NAS (SRC Cloud) los PDFs que falten allí">☁ PDFs al NAS</button>
+  {% else %}
+  <button disabled title="Define NAS_BASE_URL, NAS_USERNAME y NAS_PASSWORD en .env">☁ PDFs al NAS</button>
+  {% endif %}
 </div>
 <div id="job">{% include "_job.html" %}</div>
 

@@ -26,6 +26,12 @@ USER_AGENT = f"paperlab/0.1 (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else "pap
 _vault = os.environ.get("OBSIDIAN_VAULT_PATH")
 OBSIDIAN_VAULT_PATH = Path(_vault).expanduser().resolve() if _vault else None
 
+# NAS personal (SRC Cloud): respaldo de PDFs vía su API WebDAV.
+NAS_BASE_URL = os.environ.get("NAS_BASE_URL", "").rstrip("/")
+NAS_USERNAME = os.environ.get("NAS_USERNAME", "")
+NAS_PASSWORD = os.environ.get("NAS_PASSWORD", "")
+NAS_PDF_DIR = os.environ.get("NAS_PDF_DIR", "paperlab/pdfs").strip("/")
+
 
 def ensure_dirs() -> None:
     PDF_DIR.mkdir(parents=True, exist_ok=True)
