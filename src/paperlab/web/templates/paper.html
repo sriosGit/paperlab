@@ -15,6 +15,30 @@
   {% if p['pdf_path'] %} · PDF descargado{% elif p['pdf_url'] %} · <a href="{{ p['pdf_url'] }}" target="_blank">PDF ↗</a>{% endif %}
 </p>
 
+{% if p['excluded'] %}
+<p class="warn">
+  ✗ Paper excluido del corpus{% if p['excluded_reason'] %}: {{ p['excluded_reason'] }}{% endif %}.
+  No aparece en resúmenes, chat, síntesis ni exports.
+</p>
+<form method="post" action="/paper/{{ p['id'] }}/include"><button>↩ Reincorporar al corpus</button></form>
+{% else %}
+<form method="post" action="/paper/{{ p['id'] }}/exclude" class="inline-form">
+  <input name="reason" placeholder="Motivo (opcional): p. ej. fuera de tema">
+  <button class="danger">✗ Excluir del corpus</button>
+</form>
+{% endif %}
+
+<h2>Procedencia</h2>
+{% if provenance %}
+<ul class="meta">
+  {% for pr in provenance %}
+  <li>«{{ pr['query'] }}» en {{ pr['source'] }}{% if pr['search_name'] %} (búsqueda guardada: {{ pr['search_name'] }}){% endif %} · {{ pr['added_at'] }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="meta">Sin registro: entró antes de que se guardara la procedencia.</p>
+{% endif %}
+
 {% if p['abstract'] %}
 <h2>Abstract</h2>
 <p>{{ p['abstract'] }}</p>

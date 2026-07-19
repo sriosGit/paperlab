@@ -1,0 +1,160 @@
+"""Tests de exclusión de papers y procedencia."""
+
+import sqlite3
+
+import pytest
+
+from paperlab import analyze, db, review, synthesize
+from paperlab.ingest.base import store_papers
+from paperlab.models import Paper
+
+
+@pytest.fixture
+def conn():
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.executescript(db.SCHEMA)
+    db._migrate(c)
+    yield c
+    c.close()
+
+
+def _add_paper(conn, id, title="T", abstract="abs"):
+    conn.execute(
+        """INSERT INTO papers (id, title, title_norm, source, abstract, authors)
+           VALUES (?, ?, ?, 'arxiv', ?, '[]')""",
+        (id, title, title.lower(), abstract),
+    )
+
+
+def _add_summary(conn, paper_id):
+    conn.execute(
+        "INSERT INTO summaries (paper_id, summary_md, findings, model) VALUES (?, 'R', '[]', 'x')",
+        (paper_id,),
+    )
+
+
+# --- migración ---
+
+def test_migrate_agrega_columnas_a_base_antigua():
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE papers (id INTEGER PRIMARY KEY, title TEXT)")
+    db._migrate(c)
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(papers)")}
+    assert {"excluded", "excluded_reason"} <= cols
+    db._migrate(c)  # idempotente
+    c.close()
+
+
+def test_schema_completo_sobre_base_de_version_anterior():
+    """El SCHEMA no debe referenciar columnas que solo añade _migrate (regresión)."""
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    # base "v1": papers sin las columnas nuevas
+    c.execute(
+        """CREATE TABLE papers (id INTEGER PRIMARY KEY, doi TEXT UNIQUE, arxiv_id TEXT UNIQUE,
+             openalex_id TEXT UNIQUE, title TEXT NOT NULL, title_norm TEXT NOT NULL,
+             abstract TEXT, authors TEXT NOT NULL DEFAULT '[]', year INTEGER, venue TEXT,
+             source TEXT NOT NULL, url TEXT, pdf_url TEXT, pdf_path TEXT,
+             status TEXT NOT NULL DEFAULT 'new',
+             added_at TEXT NOT NULL DEFAULT (datetime('now')))"""
+    )
+    c.executescript(db.SCHEMA)   # no debe fallar
+    db._migrate(c)
+    assert c.execute("SELECT COUNT(*) FROM papers WHERE excluded = 0").fetchone()[0] == 0
+    c.close()
+
+
+# --- exclusión ---
+
+def test_exclude_e_include_con_motivo(conn):
+    _add_paper(conn, 1)
+    assert review.exclude(conn, [1], "fuera de tema") == 1
+    row = conn.execute("SELECT * FROM papers WHERE id = 1").fetchone()
+    assert row["excluded"] == 1 and row["excluded_reason"] == "fuera de tema"
+    review.include(conn, [1])
+    row = conn.execute("SELECT * FROM papers WHERE id = 1").fetchone()
+    assert row["excluded"] == 0 and row["excluded_reason"] is None
+
+
+def test_excluido_sale_de_resumenes_pendientes_y_chunks(conn):
+    _add_paper(conn, 1)
+    _add_paper(conn, 2)
+    review.exclude(conn, [2])
+    assert analyze.pending_summaries(conn) == [1]
+    analyze.ensure_chunks(conn)
+    troceados = {r["paper_id"] for r in conn.execute("SELECT DISTINCT paper_id FROM chunks")}
+    assert troceados == {1}
+
+
+def test_excluido_sale_de_seleccion_para_sintesis(conn):
+    for i in (1, 2, 3):
+        _add_paper(conn, i, title=f"Grafeno {i}")
+        _add_summary(conn, i)
+    review.exclude(conn, [2])
+    assert synthesize.select_papers(conn, None, 10) == [3, 1]
+    assert 2 not in synthesize.select_papers(conn, "grafeno", 10)
+
+
+def test_excluido_sale_del_rag(conn, monkeypatch):
+    _add_paper(conn, 1, title="Uno", abstract="grafeno conductor")
+    _add_paper(conn, 2, title="Dos", abstract="grafeno conductor")
+    analyze.ensure_chunks(conn)
+    review.exclude(conn, [2])
+    monkeypatch.setattr(analyze.llm, "embed", lambda t: (_ for _ in ()).throw(analyze.llm.OllamaError("sin ollama")))
+    chunks = analyze.hybrid_search(conn, "grafeno", k=10)
+    assert {c["paper_id"] for c in chunks} == {1}
+
+
+def test_excluido_no_se_reingiere_como_nuevo(conn):
+    store_papers(conn, [Paper(doi="10.1/x", title="Ruido", source="openalex")], query="ia")
+    pid = conn.execute("SELECT id FROM papers").fetchone()["id"]
+    review.exclude(conn, [pid], "ruido")
+    ins, dup = store_papers(conn, [Paper(doi="10.1/x", title="Ruido", source="openalex")], query="ia")
+    assert (ins, dup) == (0, 1)
+    assert conn.execute("SELECT excluded FROM papers WHERE id = ?", (pid,)).fetchone()[0] == 1
+
+
+# --- procedencia ---
+
+def test_store_papers_registra_procedencia(conn):
+    p = Paper(doi="10.1/x", title="Uno", source="openalex")
+    store_papers(conn, [p], query="inteligencia artificial", search_id=None)
+    pid = conn.execute("SELECT id FROM papers").fetchone()["id"]
+    prov = review.provenance(conn, pid)
+    assert len(prov) == 1
+    assert prov[0]["query"] == "inteligencia artificial" and prov[0]["source"] == "openalex"
+
+
+def test_procedencia_acumula_varias_busquedas(conn):
+    p = Paper(doi="10.1/x", title="Uno", source="openalex")
+    store_papers(conn, [p], query="ia")
+    store_papers(conn, [p], query="agentes")
+    store_papers(conn, [p], query="ia")  # repetida: no duplica
+    pid = conn.execute("SELECT id FROM papers").fetchone()["id"]
+    assert {r["query"] for r in review.provenance(conn, pid)} == {"ia", "agentes"}
+    assert len(review.provenance(conn, pid)) == 2
+
+
+def test_by_query_only_aisla_los_exclusivos(conn):
+    a = Paper(doi="10.1/a", title="Solo ia", source="openalex")
+    b = Paper(doi="10.1/b", title="Ambas", source="openalex")
+    store_papers(conn, [a, b], query="ia")
+    store_papers(conn, [b], query="agentes")
+    todos = {r["title"] for r in review.by_query(conn, "ia")}
+    solo = {r["title"] for r in review.by_query(conn, "ia", only_from_this=True)}
+    assert todos == {"Solo ia", "Ambas"}
+    assert solo == {"Solo ia"}
+
+
+def test_stats_y_queries(conn):
+    store_papers(conn, [Paper(doi="10.1/a", title="A", source="openalex")], query="ia")
+    store_papers(conn, [Paper(doi="10.1/b", title="B", source="openalex")], query="ia")
+    _add_paper(conn, 99, title="Sin procedencia")
+    pid = conn.execute("SELECT id FROM papers WHERE title = 'A'").fetchone()["id"]
+    review.exclude(conn, [pid])
+    s = review.stats(conn)
+    assert s == {"total": 3, "activos": 2, "excluidos": 1, "sin_procedencia": 1}
+    q = review.queries(conn)[0]
+    assert q["query"] == "ia" and q["n_papers"] == 2 and q["n_excluidos"] == 1

@@ -52,7 +52,7 @@ def fetch_pdfs(conn: sqlite3.Connection, limit: int | None = None, retry: bool =
     config.ensure_dirs()
     where = "pdf_path IS NULL" if retry else "status = 'new'"
     rows = conn.execute(
-        f"SELECT * FROM papers WHERE {where} ORDER BY id"
+        f"SELECT * FROM papers WHERE {where} AND excluded = 0 ORDER BY id"
         + (f" LIMIT {int(limit)}" if limit else "")
     ).fetchall()
     ok = failed = no_url = 0

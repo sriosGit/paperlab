@@ -17,8 +17,16 @@ def _find_existing(conn: sqlite3.Connection, p: Paper) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def store_papers(conn: sqlite3.Connection, papers: list[Paper]) -> tuple[int, int]:
+def store_papers(
+    conn: sqlite3.Connection,
+    papers: list[Paper],
+    query: str | None = None,
+    search_id: int | None = None,
+) -> tuple[int, int]:
     """Inserta papers nuevos; a los duplicados les completa IDs/PDF que falten.
+
+    Con `query` deja rastro de procedencia en `paper_sources` (también para los
+    duplicados: un mismo paper puede llegar por varias búsquedas).
 
     Devuelve (insertados, duplicados).
     """
@@ -51,6 +59,12 @@ def store_papers(conn: sqlite3.Connection, papers: list[Paper]) -> tuple[int, in
             )
             paper_id = cur.lastrowid
             inserted += 1
+        if query:
+            conn.execute(
+                """INSERT OR IGNORE INTO paper_sources (paper_id, search_id, query, source)
+                   VALUES (?, ?, ?, ?)""",
+                (paper_id, search_id, query, p.source),
+            )
         for cited in p.referenced_ids:
             conn.execute(
                 "INSERT OR IGNORE INTO citations (paper_id, cited_openalex_id) VALUES (?, ?)",
@@ -60,7 +74,13 @@ def store_papers(conn: sqlite3.Connection, papers: list[Paper]) -> tuple[int, in
     return inserted, duplicates
 
 
-def run_search(conn: sqlite3.Connection, query: str, sources: list[str], limit: int) -> dict:
+def run_search(
+    conn: sqlite3.Connection,
+    query: str,
+    sources: list[str],
+    limit: int,
+    search_id: int | None = None,
+) -> dict:
     """Ejecuta la búsqueda en cada fuente y guarda resultados. Devuelve conteos."""
     from . import FETCHERS
 
@@ -75,6 +95,6 @@ def run_search(conn: sqlite3.Connection, query: str, sources: list[str], limit: 
         except Exception as e:  # noqa: BLE001 — la fuente no debe tumbar el resto
             result[source] = {"error": str(e)}
             continue
-        ins, dup = store_papers(conn, papers)
+        ins, dup = store_papers(conn, papers, query=query, search_id=search_id)
         result[source] = {"encontrados": len(papers), "nuevos": ins, "duplicados": dup}
     return result

@@ -19,7 +19,8 @@ def ensure_chunks(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         """SELECT p.* FROM papers p
            WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.paper_id = p.id)
-             AND (p.pdf_path IS NOT NULL OR p.abstract IS NOT NULL)"""
+             AND (p.pdf_path IS NOT NULL OR p.abstract IS NOT NULL)
+             AND p.excluded = 0"""
     ).fetchall()
     done = 0
     for row in rows:
@@ -136,7 +137,7 @@ def hybrid_search(
     rows = conn.execute(
         f"""SELECT c.id, c.text, c.paper_id, p.title, p.year, p.source
             FROM chunks c JOIN papers p ON p.id = c.paper_id
-            WHERE c.id IN ({placeholders})""",
+            WHERE c.id IN ({placeholders}) AND p.excluded = 0""",
         ranked_ids,
     ).fetchall()
     by_id = {r["id"]: r for r in rows}
@@ -226,6 +227,7 @@ def pending_summaries(conn: sqlite3.Connection) -> list[int]:
                WHERE NOT EXISTS (SELECT 1 FROM summaries s WHERE s.paper_id = p.id)
                  AND (p.abstract IS NOT NULL
                       OR EXISTS (SELECT 1 FROM chunks c WHERE c.paper_id = p.id))
+                 AND p.excluded = 0
                ORDER BY p.id"""
         ).fetchall()
     ]

@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Biblioteca — paperlab{% endblock %}
 {% block content %}
-<h1>Biblioteca <small>{{ counts.total }} papers</small></h1>
+<h1>
+  {% if excluded %}Papers excluidos <small>{{ counts.excluidos }}</small>
+  {% else %}Biblioteca <small>{{ counts.activos }} papers activos</small>{% endif %}
+</h1>
+<p class="meta">
+  {% if excluded %}
+    Fuera de resúmenes, chat, síntesis y exports. <a href="/">← Ver corpus activo</a>
+  {% elif counts.excluidos %}
+    {{ counts.excluidos }} excluidos · <a href="/?excluded=1">ver excluidos</a>
+  {% endif %}
+</p>
 
 {% if not ollama_ok %}
 <p class="warn">⚠ Ollama no responde — los resúmenes, embeddings y chat no funcionarán hasta que esté disponible.</p>
@@ -22,6 +32,7 @@
     {% endfor %}
   </select>
   <input type="number" name="year" value="{{ year }}" placeholder="año" style="width:6em">
+  {% if excluded %}<input type="hidden" name="excluded" value="1">{% endif %}
   <button type="submit">Filtrar</button>
 </form>
 
@@ -51,7 +62,7 @@
   </thead>
   <tbody>
     {% for p in papers %}
-    <tr>
+    <tr {% if p['excluded'] %}class="excluded"{% endif %}>
       <td><a href="/paper/{{ p['id'] }}">{{ p['title'] }}</a></td>
       <td>{{ p['year'] or '—' }}</td>
       <td>{{ p['source'] }}</td>

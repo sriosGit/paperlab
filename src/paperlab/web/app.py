@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, config, db, llm, nas, synthesize
+from .. import analyze, config, db, llm, nas, review, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -86,6 +86,7 @@ def _enrich_openalex():
     pendientes = conn.execute(
         """SELECT id, doi, arxiv_id FROM papers
            WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
+             AND excluded = 0
            ORDER BY id"""
     ).fetchall()
     _log(f"papers por enriquecer: {len(pendientes)}")
@@ -140,9 +141,13 @@ def _export_obsidian():
 # ------------------------------------------------------------- biblioteca
 
 @app.get("/", response_class=HTMLResponse)
-def library(request: Request, q: str = "", source: str = "", year: str = "", status: str = ""):
+def library(
+    request: Request, q: str = "", source: str = "", year: str = "",
+    status: str = "", excluded: str = "",
+):
     conn = db.get_conn()
-    where, params = [], []
+    # por defecto la biblioteca muestra el corpus activo; ?excluded=1 la papelera
+    where, params = ["p.excluded = ?"], [1 if excluded else 0]
     if q:
         ids = [
             r["rowid"]
@@ -168,14 +173,19 @@ def library(request: Request, q: str = "", source: str = "", year: str = "", sta
               ORDER BY p.added_at DESC, p.id DESC LIMIT 200"""
     papers = conn.execute(sql, params).fetchall()
     counts = {
-        "total": conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0],
-        "sources": conn.execute("SELECT source, COUNT(*) n FROM papers GROUP BY source").fetchall(),
-        "statuses": conn.execute("SELECT status, COUNT(*) n FROM papers GROUP BY status").fetchall(),
+        **review.stats(conn),
+        "sources": conn.execute(
+            "SELECT source, COUNT(*) n FROM papers WHERE excluded = 0 GROUP BY source"
+        ).fetchall(),
+        "statuses": conn.execute(
+            "SELECT status, COUNT(*) n FROM papers WHERE excluded = 0 GROUP BY status"
+        ).fetchall(),
     }
     return templates.TemplateResponse(
         request, "library.html",
         {"papers": papers, "counts": counts, "q": q, "source": source,
-         "year": year, "status": status, "job": job, "ollama_ok": llm.is_available(),
+         "year": year, "status": status, "excluded": excluded, "job": job,
+         "ollama_ok": llm.is_available(),
          "obsidian_vault": config.OBSIDIAN_VAULT_PATH, "nas_ok": nas.enabled()},
     )
 
@@ -192,8 +202,23 @@ def paper_detail(request: Request, paper_id: int):
     ).fetchone()[0]
     return templates.TemplateResponse(
         request, "paper.html",
-        {"p": paper, "summary": summary, "n_chunks": n_chunks},
+        {"p": paper, "summary": summary, "n_chunks": n_chunks,
+         "provenance": review.provenance(conn, paper_id)},
     )
+
+
+@app.post("/paper/{paper_id}/exclude")
+def paper_exclude(paper_id: int, reason: str = Form("")):
+    conn = db.get_conn()
+    review.exclude(conn, [paper_id], reason)
+    return RedirectResponse(f"/paper/{paper_id}", status_code=303)
+
+
+@app.post("/paper/{paper_id}/include")
+def paper_include(paper_id: int):
+    conn = db.get_conn()
+    review.include(conn, [paper_id])
+    return RedirectResponse(f"/paper/{paper_id}", status_code=303)
 
 
 @app.post("/paper/{paper_id}/summarize", response_class=HTMLResponse)
@@ -317,7 +342,9 @@ def run_saved_search(search_id: int):
     s = conn.execute("SELECT * FROM saved_searches WHERE id = ?", (search_id,)).fetchone()
     if not s:
         return RedirectResponse("/searches", status_code=303)
-    result = run_search(conn, s["query"], s["sources"].split(","), s["max_results"])
+    result = run_search(
+        conn, s["query"], s["sources"].split(","), s["max_results"], search_id=search_id
+    )
     conn.execute(
         "UPDATE saved_searches SET last_run_at = datetime('now') WHERE id = ?", (search_id,)
     )
@@ -379,12 +406,12 @@ def api_papers(q: str = "", limit: int = 100):
     if q:
         rows = conn.execute(
             """SELECT p.* FROM papers_fts f JOIN papers p ON p.id = f.rowid
-               WHERE papers_fts MATCH ? ORDER BY rank LIMIT ?""",
+               WHERE papers_fts MATCH ? AND p.excluded = 0 ORDER BY rank LIMIT ?""",
             (db.fts_escape(q), limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM papers ORDER BY added_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM papers WHERE excluded = 0 ORDER BY added_at DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 

@@ -14,9 +14,10 @@ recursivo si los parciales tampoco caben de una vez).
 
 import json
 import math
+import re
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import config, db, llm
 
@@ -50,7 +51,7 @@ SYNTHESIS_PROMPT = """Compara los siguientes papers entre sí y devuelve SOLO un
 - "metodos_transferibles": lista de métodos de un paper aplicables a problemas de otros (strings)
 - "aplicaciones": lista de aplicaciones prácticas viables con la evidencia de estos papers, indicando su madurez (strings)
 
-Cada elemento debe citar los papers que lo sustentan con [n]. Si una sección no aplica, devuelve una lista vacía.
+REGLA OBLIGATORIA DE CITAS: TODO elemento de TODA lista —incluida "tendencias"— y el "panorama" deben terminar citando los papers que los sustentan con [n], p. ej. "más uso de X [2][7]". Un elemento sin cita es inválido: si no puedes citarlo, no lo incluyas. Si una sección no aplica, devuelve una lista vacía.
 {topic_line}
 PAPERS:
 {dossiers}
@@ -60,6 +61,7 @@ REDUCE_PROMPT = """Combina los siguientes análisis parciales (cada uno cubre un
 
 Reglas:
 - Conserva las citas [n] tal cual: cada número identifica un paper concreto y es consistente entre lotes. No renumeres ni inventes citas.
+- TODO elemento de TODA lista (incluida "tendencias") y el "panorama" deben llevar al menos una cita [n]; descarta los puntos que llegues sin poder citar.
 - Fusiona los puntos duplicados o muy similares sumando sus citas; prioriza los que aparecen en varios lotes.
 - Busca contradicciones también ENTRE lotes: afirmaciones de un lote que choquen con las de otro.
 - Un hueco solo es global si ningún lote lo cubre; descarta los huecos que otro lote resuelve.
@@ -77,6 +79,56 @@ class Synthesis:
     sources: list[dict]  # [{n, paper_id, title, year}]
     model: str | None = None
     created_at: str | None = None
+    audit: "CitationAudit | None" = None
+
+
+@dataclass
+class CitationAudit:
+    """Estado de las citas [n] de una síntesis frente a sus fuentes reales."""
+
+    n_sources: int
+    citadas: set[int] = field(default_factory=set)
+    fuera_de_rango: list[int] = field(default_factory=list)
+    secciones_sin_citas: list[str] = field(default_factory=list)
+
+    @property
+    def sin_citar(self) -> int:
+        return self.n_sources - len(self.citadas)
+
+    @property
+    def cobertura(self) -> float:
+        return len(self.citadas) / self.n_sources if self.n_sources else 0.0
+
+    @property
+    def ok(self) -> bool:
+        return not self.fuera_de_rango and not self.secciones_sin_citas
+
+
+_CITA = re.compile(r"\[(\d+)\]")
+
+
+def audit_citations(sections: dict, n_sources: int) -> CitationAudit:
+    """Comprueba que las citas apunten a fuentes existentes y que nada quede sin citar.
+
+    No valida que la afirmación se sostenga en el paper citado (eso exigiría
+    otra pasada del LLM), pero sí detecta el fallo más grave —citar una fuente
+    inexistente— y las secciones que el modelo devolvió sin respaldo alguno.
+    """
+    audit = CitationAudit(n_sources=n_sources)
+    for key, _label in SECTIONS:
+        value = sections.get(key)
+        if not value:
+            continue
+        texto = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        nums = [int(n) for n in _CITA.findall(texto)]
+        if not nums:
+            audit.secciones_sin_citas.append(key)
+        for n in nums:
+            if 1 <= n <= n_sources:
+                audit.citadas.add(n)
+            elif n not in audit.fuera_de_rango:
+                audit.fuera_de_rango.append(n)
+    return audit
 
 
 # ---------------------------------------------------------------- selección
@@ -92,7 +144,8 @@ def select_papers(conn: sqlite3.Connection, topic: str | None, limit: int) -> li
             """SELECT p.id FROM papers_fts f
                JOIN papers p ON p.id = f.rowid
                JOIN summaries s ON s.paper_id = p.id
-               WHERE papers_fts MATCH ? ORDER BY rank LIMIT ?""",
+               WHERE papers_fts MATCH ? AND p.excluded = 0
+               ORDER BY rank LIMIT ?""",
             (db.fts_escape(topic), limit),
         ).fetchall()
         if not rows:
@@ -101,7 +154,8 @@ def select_papers(conn: sqlite3.Connection, topic: str | None, limit: int) -> li
                    FROM chunks_fts f
                    JOIN chunks c ON c.id = f.rowid
                    JOIN summaries s ON s.paper_id = c.paper_id
-                   WHERE chunks_fts MATCH ?
+                   JOIN papers p ON p.id = c.paper_id
+                   WHERE chunks_fts MATCH ? AND p.excluded = 0
                    GROUP BY c.paper_id ORDER BY best LIMIT ?""",
                 (db.fts_escape(topic), limit),
             ).fetchall()
@@ -109,6 +163,7 @@ def select_papers(conn: sqlite3.Connection, topic: str | None, limit: int) -> li
     rows = conn.execute(
         """SELECT s.paper_id AS id FROM summaries s
            JOIN papers p ON p.id = s.paper_id
+           WHERE p.excluded = 0
            ORDER BY p.added_at DESC, p.id DESC LIMIT ?""",
         (limit,),
     ).fetchall()
@@ -219,6 +274,7 @@ def _store(
     return Synthesis(
         id=cur.lastrowid, topic=topic, sections=sections,
         sources=sources, model=config.OLLAMA_MODEL,
+        audit=audit_citations(sections, len(sources)),
     )
 
 
@@ -335,10 +391,12 @@ def get(conn: sqlite3.Connection, synthesis_id: int) -> Synthesis | None:
     if not row:
         return None
     paper_ids = json.loads(row["paper_ids"])
+    sections = json.loads(row["sections"])
     return Synthesis(
-        id=row["id"], topic=row["topic"], sections=json.loads(row["sections"]),
+        id=row["id"], topic=row["topic"], sections=sections,
         sources=_sources_for(conn, paper_ids), model=row["model"],
         created_at=row["created_at"],
+        audit=audit_citations(sections, len(paper_ids)),
     )
 
 

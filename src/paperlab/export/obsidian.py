@@ -242,7 +242,7 @@ def export_vault(
     papers_dir = vault / "Papers"
     moc_dir = papers_dir / "MOC"
 
-    papers = conn.execute("SELECT * FROM papers ORDER BY id").fetchall()
+    papers = conn.execute("SELECT * FROM papers WHERE excluded = 0 ORDER BY id").fetchall()
     summaries = {r["paper_id"]: r for r in conn.execute("SELECT * FROM summaries")}
     nombres = build_note_names(papers)
     citas, externas = load_citas_locales(conn)

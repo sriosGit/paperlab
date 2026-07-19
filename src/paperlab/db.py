@@ -27,10 +27,16 @@ CREATE TABLE IF NOT EXISTS papers (
     pdf_url TEXT,
     pdf_path TEXT,
     status TEXT NOT NULL DEFAULT 'new',   -- new | fetched | indexed | summarized
-    added_at TEXT NOT NULL DEFAULT (datetime('now'))
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- descartado en la revisión: sigue en la BD (para no re-ingerirlo) pero
+    -- queda fuera de resúmenes, RAG, síntesis y exports
+    excluded INTEGER NOT NULL DEFAULT 0,
+    excluded_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_papers_title_norm ON papers(title_norm);
 CREATE INDEX IF NOT EXISTS idx_papers_status ON papers(status);
+-- el índice de `excluded` lo crea _migrate: en bases anteriores la columna
+-- todavía no existe cuando corre este script
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract, content='papers', content_rowid='id'
@@ -107,7 +113,36 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     max_results INTEGER NOT NULL DEFAULT 50,
     last_run_at TEXT
 );
+
+-- Procedencia: qué búsqueda trajo cada paper. Se guarda la query textual
+-- además del id para que el rastro sobreviva al borrado de la búsqueda.
+CREATE TABLE IF NOT EXISTS paper_sources (
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    search_id INTEGER REFERENCES saved_searches(id) ON DELETE SET NULL,
+    query TEXT NOT NULL,
+    source TEXT NOT NULL,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(paper_id, query, source)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id);
 """
+
+# Columnas añadidas después de la v1: (tabla, columna, definición).
+_MIGRATIONS = [
+    ("papers", "excluded", "INTEGER NOT NULL DEFAULT 0"),
+    ("papers", "excluded_reason", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Añade columnas que falten en bases creadas por versiones anteriores."""
+    for tabla, columna, definicion in _MIGRATIONS:
+        existentes = {r["name"] for r in conn.execute(f"PRAGMA table_info({tabla})")}
+        if columna not in existentes:
+            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
+    # índices que dependen de columnas migradas (ya existen todas a estas alturas)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_excluded ON papers(excluded)")
+    conn.commit()
 
 
 def get_conn() -> sqlite3.Connection:
@@ -117,6 +152,7 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 

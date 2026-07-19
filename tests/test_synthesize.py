@@ -17,6 +17,42 @@ def conn():
     c.close()
 
 
+def test_audit_detecta_citas_invalidas_y_secciones_sin_respaldo():
+    sections = {
+        "panorama": "Todo bien [1][2].",
+        "tendencias": ["sube el uso de X"],            # sin cita
+        "consensos": ["coinciden [2][3]"],
+        "contradicciones": ["choque [9]"],             # fuente inexistente (solo hay 3)
+        "huecos": [],                                   # vacía: no cuenta como fallo
+        "metodos_transferibles": [],
+        "aplicaciones": [],
+    }
+    a = synthesize.audit_citations(sections, n_sources=3)
+    assert a.fuera_de_rango == [9]
+    assert a.secciones_sin_citas == ["tendencias"]
+    assert a.citadas == {1, 2, 3}
+    assert a.sin_citar == 0 and a.cobertura == 1.0
+    assert not a.ok
+
+
+def test_audit_ok_y_cobertura_parcial():
+    a = synthesize.audit_citations({"panorama": "solo cita una [1]."}, n_sources=4)
+    assert a.ok and a.citadas == {1} and a.sin_citar == 3
+    assert a.cobertura == 0.25
+
+
+def test_audit_acompana_a_la_sintesis_guardada(conn, monkeypatch):
+    _add_paper(conn, id=1, title="Uno")
+    _add_paper(conn, id=2, title="Dos")
+    _add_summary(conn, 1)
+    _add_summary(conn, 2)
+    monkeypatch.setattr(synthesize.llm, "generate_json",
+                        lambda *a, **k: {"panorama": "ok [1]", "tendencias": ["sin cita"]})
+    s = synthesize.run(conn)
+    assert s.audit.secciones_sin_citas == ["tendencias"]
+    assert synthesize.get(conn, s.id).audit.citadas == {1}
+
+
 def _add_paper(conn, *, id, title, year=2020, abstract="abs", added_at="2024-01-01"):
     conn.execute(
         """INSERT INTO papers (id, title, title_norm, year, source, abstract, authors, added_at)

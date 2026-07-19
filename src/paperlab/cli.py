@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from . import analyze, config, db, llm, synthesize
+from . import analyze, config, db, llm, review, synthesize
 from . import pdf as pdf_mod
 from .ingest import run_search
 
@@ -130,6 +130,20 @@ def _print_synthesis(s: "synthesize.Synthesis") -> None:
     typer.echo("\nPapers comparados:")
     for src in s.sources:
         typer.echo(f"  [{src['n']}] {src['title']} ({src['year'] or 's.f.'}) — paper #{src['paper_id']}")
+    a = s.audit
+    if a:
+        typer.echo(
+            f"\nCitas: {len(a.citadas)}/{a.n_sources} fuentes citadas "
+            f"({a.cobertura:.0%} de cobertura)"
+        )
+        if a.fuera_de_rango:
+            typer.echo(
+                f"  ⚠ citas a fuentes inexistentes: {a.fuera_de_rango}", err=True
+            )
+        if a.secciones_sin_citas:
+            typer.echo(
+                f"  ⚠ secciones sin ninguna cita: {', '.join(a.secciones_sin_citas)}", err=True
+            )
 
 
 @app.command(name="synthesize")
@@ -178,10 +192,71 @@ def stats():
     chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     embedded = conn.execute("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL").fetchone()[0]
     summaries = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
-    typer.echo(f"papers: {total}  " + "  ".join(f"{r[0]}={r[1]}" for r in by_status))
+    excluidos = conn.execute("SELECT COUNT(*) FROM papers WHERE excluded = 1").fetchone()[0]
+    typer.echo(
+        f"papers: {total} (activos: {total - excluidos}, excluidos: {excluidos})  "
+        + "  ".join(f"{r[0]}={r[1]}" for r in by_status)
+    )
     typer.echo(f"chunks: {chunks} (con embedding: {embedded})")
     typer.echo(f"resúmenes: {summaries}")
     typer.echo(f"ollama disponible: {'sí' if llm.is_available() else 'NO'}")
+
+
+def _parse_ids(ids: str) -> list[int]:
+    return [int(x) for x in ids.replace(",", " ").split() if x.strip()]
+
+
+@app.command()
+def exclude(
+    ids: str = typer.Argument(..., help="Ids de papers separados por coma o espacio"),
+    reason: str = typer.Option("", help="Motivo (se guarda para saber por qué se descartó)"),
+):
+    """Descarta papers del corpus: siguen en la BD pero fuera de análisis y exports."""
+    conn = db.get_conn()
+    n = review.exclude(conn, _parse_ids(ids), reason)
+    typer.echo(f"excluidos: {n}")
+
+
+@app.command()
+def include(ids: str = typer.Argument(..., help="Ids de papers separados por coma o espacio")):
+    """Reincorpora papers excluidos al corpus."""
+    conn = db.get_conn()
+    typer.echo(f"reincorporados: {review.include(conn, _parse_ids(ids))}")
+
+
+@app.command(name="review")
+def review_cmd(
+    query: str = typer.Option(None, help="Ver los papers que trajo esta query"),
+    only_from_this: bool = typer.Option(False, "--only", help="Con --query: solo los que ninguna otra búsqueda trajo"),
+    excluded: bool = typer.Option(False, "--excluded", help="Listar los papers ya excluidos"),
+):
+    """Revisa la procedencia del corpus para detectar y descartar ruido."""
+    conn = db.get_conn()
+    if excluded:
+        rows = conn.execute(
+            "SELECT id, title, excluded_reason FROM papers WHERE excluded = 1 ORDER BY id"
+        ).fetchall()
+        for r in rows:
+            motivo = f" — {r['excluded_reason']}" if r["excluded_reason"] else ""
+            typer.echo(f"  #{r['id']} {r['title'][:80]}{motivo}")
+        typer.echo(f"total excluidos: {len(rows)}")
+        return
+    if query:
+        rows = review.by_query(conn, query, only_from_this=only_from_this)
+        for r in rows:
+            marca = "✗" if r["excluded"] else " "
+            typer.echo(f" {marca} #{r['id']} {r['title'][:80]}")
+        typer.echo(f"total: {len(rows)} papers de «{query}»")
+        typer.echo("descarta con: paperlab exclude <ids> --reason «fuera de tema»")
+        return
+    s = review.stats(conn)
+    typer.echo(
+        f"papers: {s['total']} · activos: {s['activos']} · excluidos: {s['excluidos']} · "
+        f"sin procedencia registrada: {s['sin_procedencia']}"
+    )
+    typer.echo("\nPor búsqueda:")
+    for r in review.queries(conn):
+        typer.echo(f"  {r['n_papers']:4d} papers ({r['n_excluidos']} excluidos)  «{r['query']}»")
 
 
 @app.command(name="enrich-openalex")
@@ -194,6 +269,7 @@ def enrich_openalex(limit: int = typer.Option(None, help="Máximo de papers a en
     pendientes = conn.execute(
         """SELECT id, doi, arxiv_id FROM papers
            WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
+             AND excluded = 0
            ORDER BY id"""
     ).fetchall()
     if limit:

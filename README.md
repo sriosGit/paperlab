@@ -29,6 +29,9 @@ paperlab fetch-pdfs --retry  # reintenta todo paper sin PDF (re-indexa al conseg
 paperlab process             # extrae texto, trocea, indexa FTS5 y calcula embeddings
 paperlab summarize --limit 5 # resúmenes estructurados con el LLM
 paperlab ask "¿qué métodos usan estos papers?"
+paperlab review              # procedencia del corpus y papers por búsqueda
+paperlab review --query "ia" --only   # los que SOLO trajo esa búsqueda (candidatos a descartar)
+paperlab exclude 12,34 --reason "fuera de tema"   # descarta ruido (reversible con `include`)
 paperlab sync-nas            # respalda los PDFs en el NAS (SRC Cloud) vía WebDAV
 paperlab synthesize "protein folding"   # análisis transversal: compara papers entre sí
 paperlab synthesize --full              # todo el corpus por lotes (map-reduce); tarda ~2 min por lote
@@ -42,7 +45,8 @@ paperlab stats
 paperlab serve               # http://localhost:8000, escucha en 0.0.0.0
 ```
 
-- **Biblioteca**: filtros por texto, fuente, año y estado; botones en background para procesar/resumir pendientes, enriquecer con OpenAlex y exportar a Obsidian (este último requiere `OBSIDIAN_VAULT_PATH`).
+- **Biblioteca**: filtros por texto, fuente, año y estado; botones en background para procesar/resumir pendientes, enriquecer con OpenAlex, exportar a Obsidian y respaldar PDFs en el NAS. Muestra solo el corpus activo; los papers descartados viven en `/?excluded=1`.
+- **Detalle de paper**: procedencia (qué búsquedas lo trajeron) y botón para excluirlo del corpus con un motivo.
 - **Detalle de paper**: abstract, resumen estructurado generado bajo demanda.
 - **Chat**: preguntas al corpus con RAG híbrido (embeddings + FTS5) y citas clicables.
 - **Síntesis**: análisis transversal del corpus — compara los resúmenes de varios papers (por tema o los más recientes) y detecta tendencias, consensos, contradicciones, huecos abiertos, métodos transferibles y aplicaciones viables, todo citado con [n]. Con «todo el corpus (map-reduce)» analiza el corpus completo por lotes y combina los análisis parciales. Las síntesis quedan guardadas.
@@ -73,6 +77,26 @@ venv (`mise install && mise use`), aunque cualquier 3.11+ funciona.
 > Para desarrollar desde otra máquina de la tailnet usando el Ollama de la Mac,
 > en la Mac ejecuta `launchctl setenv OLLAMA_HOST 0.0.0.0` y reinicia Ollama;
 > en la otra máquina pon `OLLAMA_BASE_URL=http://mb-2022:11434` en `.env`.
+
+## Calidad del corpus
+
+Buscar términos ambiguos («IA», «agente») arrastra papers de otros campos
+—*Rhizoctonia solani* **AG-1 IA**, supernovas **tipo Ia**— que contaminan
+resúmenes, RAG y síntesis. Dos mecanismos lo contienen:
+
+- **Exclusión**: `paperlab exclude <ids>` (o el botón en el detalle del paper)
+  descarta un paper del corpus. No lo borra —así una búsqueda futura no lo
+  vuelve a ingerir como nuevo— pero lo saca de resúmenes, chat, síntesis y
+  exports. Reversible con `paperlab include`.
+- **Procedencia**: cada paper registra qué búsqueda lo trajo (`paper_sources`).
+  `paperlab review` resume el corpus por consulta y `--query X --only` lista los
+  que *solo* entraron por esa consulta: los seguros de descartar en bloque si
+  resultó ser ruido.
+
+Las síntesis se auditan al mostrarlas: cobertura de citas, citas a fuentes
+inexistentes y secciones sin ningún respaldo aparecen marcadas. La auditoría
+verifica que las `[n]` existan, no que la afirmación se sostenga en el paper
+citado — sigue haciendo falta abrir la fuente antes de apoyarse en un hallazgo.
 
 ## PDFs en el NAS (SRC Cloud)
 

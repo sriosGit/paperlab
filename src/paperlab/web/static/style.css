@@ -32,7 +32,8 @@ a { color: var(--accent); }
 table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
 th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { color: var(--muted); font-weight: normal; font-size: .85em; }
-.filters, .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: .8rem 0; }
+.filters, .actions, .inline-form { display: flex; gap: .5rem; flex-wrap: wrap; margin: .8rem 0; }
+tr.excluded td { opacity: .55; text-decoration: line-through; }
 input, select, textarea, button {
   font: inherit; color: inherit; background: var(--bg);
   border: 1px solid var(--border); border-radius: 6px; padding: .4rem .6rem;
