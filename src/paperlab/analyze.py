@@ -49,18 +49,34 @@ def ensure_chunks(conn: sqlite3.Connection) -> int:
 
 
 def ensure_embeddings(conn: sqlite3.Connection) -> int:
-    """Calcula embeddings de los chunks que no los tienen."""
-    rows = conn.execute("SELECT id, text FROM chunks WHERE embedding IS NULL").fetchall()
+    """Calcula embeddings pendientes o generados por otro modelo.
+
+    Al cambiar OLLAMA_EMBED_MODEL los vectores viejos quedan obsoletos (otra
+    dimensión, otro espacio), así que se recalculan en vez de mezclarse.
+    """
+    rows = conn.execute(
+        "SELECT id, text FROM chunks WHERE embedding IS NULL OR embed_model IS NOT ?",
+        (config.OLLAMA_EMBED_MODEL,),
+    ).fetchall()
     for i in range(0, len(rows), EMBED_BATCH):
         batch = rows[i : i + EMBED_BATCH]
         vectors = llm.embed([r["text"] for r in batch])
         for row, vec in zip(batch, vectors):
             conn.execute(
-                "UPDATE chunks SET embedding = ? WHERE id = ?",
-                (db.embedding_to_blob(vec), row["id"]),
+                "UPDATE chunks SET embedding = ?, embed_model = ? WHERE id = ?",
+                (db.embedding_to_blob(vec), config.OLLAMA_EMBED_MODEL, row["id"]),
             )
         conn.commit()
     return len(rows)
+
+
+def stale_embeddings(conn: sqlite3.Connection) -> int:
+    """Chunks con embedding de un modelo distinto al configurado."""
+    return conn.execute(
+        """SELECT COUNT(*) FROM chunks
+           WHERE embedding IS NOT NULL AND embed_model IS NOT ?""",
+        (config.OLLAMA_EMBED_MODEL,),
+    ).fetchone()[0]
 
 
 # ---------------------------------------------------------------- búsqueda híbrida
@@ -74,13 +90,21 @@ class _VectorIndex:
         self._stamp: tuple | None = None
 
     def _load(self, conn: sqlite3.Connection) -> None:
+        # solo los vectores del modelo activo: los de otro modelo tienen otra
+        # dimensión y romperían la matriz (y el coseno no significaría nada)
+        model = config.OLLAMA_EMBED_MODEL
         stamp = conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM chunks WHERE embedding IS NOT NULL"
+            """SELECT COUNT(*), COALESCE(MAX(id), 0) FROM chunks
+               WHERE embedding IS NOT NULL AND embed_model IS ?""",
+            (model,),
         ).fetchone()
-        stamp = tuple(stamp)
+        stamp = (*stamp, model)
         if stamp == self._stamp:
             return
-        rows = conn.execute("SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL").fetchall()
+        rows = conn.execute(
+            "SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL AND embed_model IS ?",
+            (model,),
+        ).fetchall()
         if not rows:
             self.ids, self.matrix, self._stamp = None, None, stamp
             return

@@ -62,6 +62,9 @@ def _pipeline():
     _log(f"PDFs: {pdf_mod.fetch_pdfs(conn)}")
     _log("troceando e indexando…")
     _log(f"papers troceados: {analyze.ensure_chunks(conn)}")
+    obsoletos = analyze.stale_embeddings(conn)
+    if obsoletos:
+        _log(f"↻ {obsoletos} embeddings de otro modelo: se recalculan con {config.OLLAMA_EMBED_MODEL}")
     _log("calculando embeddings…")
     _log(f"chunks con embedding nuevo: {analyze.ensure_embeddings(conn)}")
 

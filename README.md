@@ -8,8 +8,14 @@ Recopilador y analizador **local-first** de artículos científicos. Busca en ar
 - [Ollama](https://ollama.com) con los modelos:
   ```sh
   ollama pull qwen2.5:14b        # generación (ya lo tienes)
-  ollama pull nomic-embed-text   # embeddings (~274 MB)
+  ollama pull bge-m3             # embeddings multilingües (~1.2 GB)
   ```
+  `bge-m3` cubre 100+ idiomas y hace recuperación *cross-lingual*: preguntas en
+  español recuperan pasajes en portugués o inglés sin traducir nada — clave si
+  tu corpus es multilingüe. `nomic-embed-text` (~274 MB) sirve si trabajas solo
+  en inglés y quieres ahorrar RAM. Al cambiar de modelo, `paperlab process`
+  detecta los embeddings obsoletos y los recalcula (los vectores de modelos
+  distintos no son comparables).
 
 ## Instalación
 

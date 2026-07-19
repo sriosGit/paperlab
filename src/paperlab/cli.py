@@ -71,6 +71,12 @@ def process(no_embed: bool = typer.Option(False, "--no-embed", help="Solo trocea
     typer.echo(f"papers troceados: {n}")
     if no_embed:
         return
+    obsoletos = analyze.stale_embeddings(conn)
+    if obsoletos:
+        typer.echo(
+            f"↻ {obsoletos} chunks tienen embeddings de otro modelo: "
+            f"se recalculan con {config.OLLAMA_EMBED_MODEL}"
+        )
     try:
         e = analyze.ensure_embeddings(conn)
         typer.echo(f"chunks con embedding nuevo: {e}")
@@ -198,6 +204,12 @@ def stats():
         + "  ".join(f"{r[0]}={r[1]}" for r in by_status)
     )
     typer.echo(f"chunks: {chunks} (con embedding: {embedded})")
+    for r in conn.execute(
+        "SELECT COALESCE(embed_model, '(desconocido)') m, COUNT(*) n FROM chunks "
+        "WHERE embedding IS NOT NULL GROUP BY m"
+    ):
+        marca = "" if r["m"] == config.OLLAMA_EMBED_MODEL else "  ← obsoleto, se recalculará"
+        typer.echo(f"  embeddings de {r['m']}: {r['n']}{marca}")
     typer.echo(f"resúmenes: {summaries}")
     typer.echo(f"ollama disponible: {'sí' if llm.is_available() else 'NO'}")
 

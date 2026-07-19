@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     seq INTEGER NOT NULL,
     text TEXT NOT NULL,
     embedding BLOB,                        -- float32[] ; NULL = pendiente
+    -- modelo que generó el embedding: vectores de modelos distintos tienen
+    -- dimensiones distintas y no se pueden comparar entre sí
+    embed_model TEXT,
     UNIQUE(paper_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_paper ON chunks(paper_id);
@@ -131,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id);
 _MIGRATIONS = [
     ("papers", "excluded", "INTEGER NOT NULL DEFAULT 0"),
     ("papers", "excluded_reason", "TEXT"),
+    ("chunks", "embed_model", "TEXT"),
 ]
 
 
@@ -138,6 +142,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """Añade columnas que falten en bases creadas por versiones anteriores."""
     for tabla, columna, definicion in _MIGRATIONS:
         existentes = {r["name"] for r in conn.execute(f"PRAGMA table_info({tabla})")}
+        if not existentes:
+            continue  # la tabla no existe todavía: el SCHEMA ya la creará completa
         if columna not in existentes:
             conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
     # índices que dependen de columnas migradas (ya existen todas a estas alturas)

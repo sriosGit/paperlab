@@ -158,3 +158,46 @@ def test_stats_y_queries(conn):
     assert s == {"total": 3, "activos": 2, "excluidos": 1, "sin_procedencia": 1}
     q = review.queries(conn)[0]
     assert q["query"] == "ia" and q["n_papers"] == 2 and q["n_excluidos"] == 1
+
+
+# --- guarda de modelo de embeddings ---
+
+def test_ensure_embeddings_recalcula_al_cambiar_de_modelo(conn, monkeypatch):
+    from paperlab import config
+    _add_paper(conn, 1)
+    conn.execute("INSERT INTO chunks (paper_id, seq, text) VALUES (1, 0, 'texto')")
+    monkeypatch.setattr(config, "OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setattr(analyze.llm, "embed", lambda ts: [[0.1, 0.2] for _ in ts])
+    assert analyze.ensure_embeddings(conn) == 1
+    assert analyze.stale_embeddings(conn) == 0
+    assert analyze.ensure_embeddings(conn) == 0          # ya está, no repite
+
+    monkeypatch.setattr(config, "OLLAMA_EMBED_MODEL", "bge-m3")
+    assert analyze.stale_embeddings(conn) == 1           # detecta el obsoleto
+    monkeypatch.setattr(analyze.llm, "embed", lambda ts: [[0.1, 0.2, 0.3, 0.4] for _ in ts])
+    assert analyze.ensure_embeddings(conn) == 1          # lo recalcula
+    assert analyze.stale_embeddings(conn) == 0
+    row = conn.execute("SELECT embed_model FROM chunks WHERE id = 1").fetchone()
+    assert row["embed_model"] == "bge-m3"
+
+
+def test_indice_vectorial_ignora_vectores_de_otro_modelo(conn, monkeypatch):
+    """Mezclar dimensiones rompería la matriz numpy: deben filtrarse."""
+    from paperlab import config
+    _add_paper(conn, 1)
+    conn.execute("INSERT INTO chunks (paper_id, seq, text) VALUES (1, 0, 'viejo')")
+    conn.execute("INSERT INTO chunks (paper_id, seq, text) VALUES (1, 1, 'nuevo')")
+    conn.execute(
+        "UPDATE chunks SET embedding = ?, embed_model = 'nomic-embed-text' WHERE seq = 0",
+        (db.embedding_to_blob([0.1, 0.2]),),
+    )
+    conn.execute(
+        "UPDATE chunks SET embedding = ?, embed_model = 'bge-m3' WHERE seq = 1",
+        (db.embedding_to_blob([0.1, 0.2, 0.3, 0.4]),),
+    )
+    conn.commit()
+    monkeypatch.setattr(config, "OLLAMA_EMBED_MODEL", "bge-m3")
+    idx = analyze._VectorIndex()
+    ids = idx.search(conn, [0.1, 0.2, 0.3, 0.4], k=10)
+    assert idx.matrix.shape == (1, 4)     # solo el vector de bge-m3
+    assert ids == [conn.execute("SELECT id FROM chunks WHERE seq = 1").fetchone()["id"]]
