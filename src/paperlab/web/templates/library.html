@@ -28,6 +28,14 @@
 <div class="actions">
   <button hx-post="/jobs/process" hx-target="#job" hx-swap="innerHTML">⚙ Procesar pendientes</button>
   <button hx-post="/jobs/summarize" hx-target="#job" hx-swap="innerHTML">📝 Resumir pendientes</button>
+  <button hx-post="/jobs/enrich" hx-target="#job" hx-swap="innerHTML"
+          title="Rellena openalex_id y citas de papers que solo tienen DOI/arXiv">🔗 Enriquecer OpenAlex</button>
+  {% if obsidian_vault %}
+  <button hx-post="/jobs/export-obsidian" hx-target="#job" hx-swap="innerHTML"
+          title="Exporta notas, wikilinks y MOCs a {{ obsidian_vault }}">🗂 Exportar a Obsidian</button>
+  {% else %}
+  <button disabled title="Define OBSIDIAN_VAULT_PATH en .env para activar el export">🗂 Exportar a Obsidian</button>
+  {% endif %}
 </div>
 <div id="job">{% include "_job.html" %}</div>
 

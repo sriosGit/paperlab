@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, db, llm, synthesize
+from .. import analyze, config, db, llm, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -78,6 +78,56 @@ def _summarize_all():
             _log(f"[{i}/{len(ids)}] paper {pid}: {e}")
 
 
+def _enrich_openalex():
+    from ..ingest import openalex
+    from ..ingest.base import store_papers
+
+    conn = db.get_conn()
+    pendientes = conn.execute(
+        """SELECT id, doi, arxiv_id FROM papers
+           WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
+           ORDER BY id"""
+    ).fetchall()
+    _log(f"papers por enriquecer: {len(pendientes)}")
+    citas_antes = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    enriquecidos = fallidos = 0
+    for i, row in enumerate(pendientes, 1):
+        try:
+            paper = openalex.fetch_by_ids(row["doi"], row["arxiv_id"])
+        except Exception as e:  # noqa: BLE001 — un paper no debe tumbar el lote
+            _log(f"[{i}/{len(pendientes)}] paper {row['id']}: ERROR {e}")
+            fallidos += 1
+            continue
+        if paper and paper.openalex_id:
+            store_papers(conn, [paper])
+            enriquecidos += 1
+        else:
+            fallidos += 1
+        _log(f"[{i}/{len(pendientes)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
+    citas_despues = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    _log(
+        f"enriquecidos: {enriquecidos} · sin match/error: {fallidos} · "
+        f"citas nuevas: {citas_despues - citas_antes}"
+    )
+
+
+def _export_obsidian():
+    from ..export import obsidian
+
+    if config.OBSIDIAN_VAULT_PATH is None:
+        raise RuntimeError("define OBSIDIAN_VAULT_PATH en .env para exportar")
+    conn = db.get_conn()
+    _log(f"exportando a {config.OBSIDIAN_VAULT_PATH}…")
+    s = obsidian.export_vault(conn, config.OBSIDIAN_VAULT_PATH)
+    _log(
+        f"papers: {s['notas']} · MOCs: {s['mocs']} · nuevos {s['nuevas']}, "
+        f"actualizados {s['actualizadas']}, sin cambios {s['sin_cambios']}, "
+        f"renombrados {s['renombradas']} · huérfanas: {len(s['huerfanas'])}"
+    )
+    for h in s["huerfanas"]:
+        _log(f"  huérfana (borra con el CLI --prune): {h}")
+
+
 # ------------------------------------------------------------- biblioteca
 
 @app.get("/", response_class=HTMLResponse)
@@ -116,7 +166,8 @@ def library(request: Request, q: str = "", source: str = "", year: str = "", sta
     return templates.TemplateResponse(
         request, "library.html",
         {"papers": papers, "counts": counts, "q": q, "source": source,
-         "year": year, "status": status, "job": job, "ollama_ok": llm.is_available()},
+         "year": year, "status": status, "job": job, "ollama_ok": llm.is_available(),
+         "obsidian_vault": config.OBSIDIAN_VAULT_PATH},
     )
 
 
@@ -278,6 +329,18 @@ def start_process(request: Request):
 @app.post("/jobs/summarize", response_class=HTMLResponse)
 def start_summarize(request: Request):
     _run_job("resumir", _summarize_all)
+    return templates.TemplateResponse(request, "_job.html", {"job": job})
+
+
+@app.post("/jobs/enrich", response_class=HTMLResponse)
+def start_enrich(request: Request):
+    _run_job("enriquecer OpenAlex", _enrich_openalex)
+    return templates.TemplateResponse(request, "_job.html", {"job": job})
+
+
+@app.post("/jobs/export-obsidian", response_class=HTMLResponse)
+def start_export_obsidian(request: Request):
+    _run_job("exportar a Obsidian", _export_obsidian)
     return templates.TemplateResponse(request, "_job.html", {"job": job})
 
 
