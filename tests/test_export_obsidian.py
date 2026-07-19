@@ -48,10 +48,10 @@ def test_build_note_names_resuelve_colisiones(conn):
     _add_paper(conn, id=1, title="Mismo título", year=2020)
     _add_paper(conn, id=2, title="Mismo título", year=2020)
     papers = conn.execute("SELECT * FROM papers ORDER BY id").fetchall()
-    nombres = obsidian.build_note_names(papers)
-    assert nombres[1] == "2020 - Mismo título"
-    assert nombres[2] == "2020 - Mismo título (paperlab-2)"
-    assert nombres[1] != nombres[2]
+    names = obsidian.build_note_names(papers)
+    assert names[1] == "2020 - Mismo título"
+    assert names[2] == "2020 - Mismo título (paperlab-2)"
+    assert names[1] != names[2]
 
 
 # --- citas locales vs externas ---
@@ -61,16 +61,16 @@ def test_wikilinks_solo_apuntan_a_papers_locales(conn):
     _add_paper(conn, id=2, title="Citado local", openalex_id="W2")
     conn.execute("INSERT INTO citations VALUES (1, 'W2')")      # local
     conn.execute("INSERT INTO citations VALUES (1, 'W999')")    # externo
-    locales, externas = obsidian.load_citas_locales(conn)
-    assert locales == {1: [2]}
-    assert externas == {1: 1}
+    local_cites, external_refs = obsidian.load_local_citations(conn)
+    assert local_cites == {1: [2]}
+    assert external_refs == {1: 1}
 
 
-def test_texto_limpio_normaliza_lista_python():
-    crudo = "['frase uno', 'frase dos']"
-    assert obsidian._texto_limpio(crudo) == "frase uno frase dos"
-    assert obsidian._texto_limpio("texto normal") == "texto normal"
-    assert obsidian._texto_limpio(None) == ""
+def test_clean_text_normaliza_lista_python():
+    raw = "['frase uno', 'frase dos']"
+    assert obsidian._clean_text(raw) == "frase uno frase dos"
+    assert obsidian._clean_text("texto normal") == "texto normal"
+    assert obsidian._clean_text(None) == ""
 
 
 # --- export end to end sobre tmp_path ---
@@ -83,7 +83,7 @@ def test_export_crea_notas_mocs_e_indice(conn, tmp_path):
     assert (tmp_path / "Papers" / "2020 - Paper uno.md").exists()
     assert (tmp_path / "Papers" / "MOC" / "MOC - ia.md").exists()
     assert (tmp_path / "Papers" / "MOC" / "Índice de papers.md").exists()
-    assert stats["nuevas"] == 3  # 1 paper + 1 moc + indice
+    assert stats["created"] == 3  # 1 paper + 1 moc + indice
 
 
 def test_reexport_es_idempotente(conn, tmp_path):
@@ -91,9 +91,9 @@ def test_reexport_es_idempotente(conn, tmp_path):
     _add_summary(conn, 1)
     obsidian.export_vault(conn, tmp_path)
     stats = obsidian.export_vault(conn, tmp_path)
-    assert stats["nuevas"] == 0
-    assert stats["actualizadas"] == 0
-    assert stats["sin_cambios"] == 2  # paper + indice (no hay saved_searches)
+    assert stats["created"] == 0
+    assert stats["updated"] == 0
+    assert stats["unchanged"] == 2  # paper + indice (no hay saved_searches)
 
 
 def test_seccion_usuario_se_preserva(conn, tmp_path):
@@ -101,8 +101,8 @@ def test_seccion_usuario_se_preserva(conn, tmp_path):
     _add_summary(conn, 1)
     obsidian.export_vault(conn, tmp_path)
     nota = tmp_path / "Papers" / "2020 - Paper uno.md"
-    contenido = nota.read_text(encoding="utf-8")
-    nota.write_text(contenido + "Mi nota personal.\n", encoding="utf-8")
+    content = nota.read_text(encoding="utf-8")
+    nota.write_text(content + "Mi nota personal.\n", encoding="utf-8")
 
     obsidian.export_vault(conn, tmp_path)
     assert "Mi nota personal." in nota.read_text(encoding="utf-8")
@@ -114,11 +114,11 @@ def test_prune_borra_huerfanas(conn, tmp_path):
     conn.execute("DELETE FROM papers WHERE id=1")
 
     sin_prune = obsidian.export_vault(conn, tmp_path)
-    assert len(sin_prune["huerfanas"]) == 1
+    assert len(sin_prune["orphans"]) == 1
     assert (tmp_path / "Papers" / "2020 - Paper uno.md").exists()
 
     con_prune = obsidian.export_vault(conn, tmp_path, prune=True)
-    assert con_prune["podadas"] == 1
+    assert con_prune["pruned"] == 1
     assert not (tmp_path / "Papers" / "2020 - Paper uno.md").exists()
 
 

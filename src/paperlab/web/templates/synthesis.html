@@ -7,14 +7,14 @@
 
 {% if s.audit %}
 <p class="{% if s.audit.ok %}meta{% else %}warn{% endif %}">
-  Citas verificadas: {{ s.audit.citadas | length }}/{{ s.audit.n_sources }} fuentes citadas
-  ({{ '%.0f' | format(s.audit.cobertura * 100) }}% de cobertura){% if s.audit.sin_citar %},
-  {{ s.audit.sin_citar }} sin citar{% endif %}.
-  {% if s.audit.fuera_de_rango %}
-  <br>⚠ Citas a fuentes inexistentes: {{ s.audit.fuera_de_rango | join(', ') }} — trátalas como no verificadas.
+  Citas verificadas: {{ s.audit.cited | length }}/{{ s.audit.n_sources }} fuentes citadas
+  ({{ '%.0f' | format(s.audit.coverage * 100) }}% de cobertura){% if s.audit.uncited %},
+  {{ s.audit.uncited }} sin citar{% endif %}.
+  {% if s.audit.out_of_range %}
+  <br>⚠ Citas a fuentes inexistentes: {{ s.audit.out_of_range | join(', ') }} — trátalas como no verificadas.
   {% endif %}
-  {% if s.audit.secciones_sin_citas %}
-  <br>⚠ Secciones sin ninguna cita: {{ s.audit.secciones_sin_citas | join(', ') }} — sin respaldo rastreable.
+  {% if s.audit.sections_without_citations %}
+  <br>⚠ Secciones sin ninguna cita: {{ s.audit.sections_without_citations | join(', ') }} — sin respaldo rastreable.
   {% endif %}
 </p>
 {% endif %}

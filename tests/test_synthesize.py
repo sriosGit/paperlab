@@ -28,17 +28,17 @@ def test_audit_detecta_citas_invalidas_y_secciones_sin_respaldo():
         "aplicaciones": [],
     }
     a = synthesize.audit_citations(sections, n_sources=3)
-    assert a.fuera_de_rango == [9]
-    assert a.secciones_sin_citas == ["tendencias"]
-    assert a.citadas == {1, 2, 3}
-    assert a.sin_citar == 0 and a.cobertura == 1.0
+    assert a.out_of_range == [9]
+    assert a.sections_without_citations == ["tendencias"]
+    assert a.cited == {1, 2, 3}
+    assert a.uncited == 0 and a.coverage == 1.0
     assert not a.ok
 
 
 def test_audit_ok_y_cobertura_parcial():
     a = synthesize.audit_citations({"panorama": "solo cita una [1]."}, n_sources=4)
-    assert a.ok and a.citadas == {1} and a.sin_citar == 3
-    assert a.cobertura == 0.25
+    assert a.ok and a.cited == {1} and a.uncited == 3
+    assert a.coverage == 0.25
 
 
 def test_audit_acompana_a_la_sintesis_guardada(conn, monkeypatch):
@@ -49,8 +49,8 @@ def test_audit_acompana_a_la_sintesis_guardada(conn, monkeypatch):
     monkeypatch.setattr(synthesize.llm, "generate_json",
                         lambda *a, **k: {"panorama": "ok [1]", "tendencias": ["sin cita"]})
     s = synthesize.run(conn)
-    assert s.audit.secciones_sin_citas == ["tendencias"]
-    assert synthesize.get(conn, s.id).audit.citadas == {1}
+    assert s.audit.sections_without_citations == ["tendencias"]
+    assert synthesize.get(conn, s.id).audit.cited == {1}
 
 
 def _add_paper(conn, *, id, title, year=2020, abstract="abs", added_at="2024-01-01"):
@@ -204,10 +204,10 @@ def test_run_full_un_solo_lote_no_reduce(conn, monkeypatch):
 
 
 def test_reduce_recursivo_agrupa_por_rondas(monkeypatch):
-    llamadas = []
+    calls = []
 
     def fake(prompt, system=None):
-        llamadas.append(prompt)
+        calls.append(prompt)
         return {"panorama": "combinado"}
 
     monkeypatch.setattr(synthesize.llm, "generate_json", fake)
@@ -217,7 +217,7 @@ def test_reduce_recursivo_agrupa_por_rondas(monkeypatch):
     ]
     # 8 parciales con grupos de 6: ronda 1 = [6, 2] → 2 llamadas; ronda 2 = 1 llamada
     sections = synthesize._reduce(partials, None, lambda m: None)
-    assert len(llamadas) == 3
+    assert len(calls) == 3
     assert sections["panorama"] == "combinado"
 
 

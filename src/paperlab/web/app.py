@@ -62,9 +62,9 @@ def _pipeline():
     _log(f"PDFs: {pdf_mod.fetch_pdfs(conn)}")
     _log("troceando e indexando…")
     _log(f"papers troceados: {analyze.ensure_chunks(conn)}")
-    obsoletos = analyze.stale_embeddings(conn)
-    if obsoletos:
-        _log(f"↻ {obsoletos} embeddings de otro modelo: se recalculan con {config.OLLAMA_EMBED_MODEL}")
+    stale = analyze.stale_embeddings(conn)
+    if stale:
+        _log(f"↻ {stale} embeddings de otro modelo: se recalculan con {config.OLLAMA_EMBED_MODEL}")
     _log("calculando embeddings…")
     _log(f"chunks con embedding nuevo: {analyze.ensure_embeddings(conn)}")
 
@@ -86,32 +86,32 @@ def _enrich_openalex():
     from ..ingest.base import store_papers
 
     conn = db.get_conn()
-    pendientes = conn.execute(
+    pending = conn.execute(
         """SELECT id, doi, arxiv_id FROM papers
            WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
              AND excluded = 0
            ORDER BY id"""
     ).fetchall()
-    _log(f"papers por enriquecer: {len(pendientes)}")
-    citas_antes = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
-    enriquecidos = fallidos = 0
-    for i, row in enumerate(pendientes, 1):
+    _log(f"papers por enriquecer: {len(pending)}")
+    cites_before = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    enriched = failed = 0
+    for i, row in enumerate(pending, 1):
         try:
             paper = openalex.fetch_by_ids(row["doi"], row["arxiv_id"])
         except Exception as e:  # noqa: BLE001 — un paper no debe tumbar el lote
-            _log(f"[{i}/{len(pendientes)}] paper {row['id']}: ERROR {e}")
-            fallidos += 1
+            _log(f"[{i}/{len(pending)}] paper {row['id']}: ERROR {e}")
+            failed += 1
             continue
         if paper and paper.openalex_id:
             store_papers(conn, [paper])
-            enriquecidos += 1
+            enriched += 1
         else:
-            fallidos += 1
-        _log(f"[{i}/{len(pendientes)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
-    citas_despues = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+            failed += 1
+        _log(f"[{i}/{len(pending)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
+    cites_after = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
     _log(
-        f"enriquecidos: {enriquecidos} · sin match/error: {fallidos} · "
-        f"citas nuevas: {citas_despues - citas_antes}"
+        f"enriquecidos: {enriched} · sin match/error: {failed} · "
+        f"citas nuevas: {cites_after - cites_before}"
     )
 
 
@@ -120,7 +120,7 @@ def _sync_nas():
     _log(f"sincronizando PDFs con el NAS ({config.NAS_BASE_URL})…")
     r = nas.sync_pdfs(conn, progress=_log)
     _log(
-        f"subidos: {r['subidos']} · ya en NAS: {r['ya_en_nas']} · perdidos: {r['perdidos']}"
+        f"subidos: {r['uploaded']} · ya en NAS: {r['already_on_nas']} · perdidos: {r['missing']}"
     )
 
 
@@ -133,11 +133,11 @@ def _export_obsidian():
     _log(f"exportando a {config.OBSIDIAN_VAULT_PATH}…")
     s = obsidian.export_vault(conn, config.OBSIDIAN_VAULT_PATH)
     _log(
-        f"papers: {s['notas']} · MOCs: {s['mocs']} · nuevos {s['nuevas']}, "
-        f"actualizados {s['actualizadas']}, sin cambios {s['sin_cambios']}, "
-        f"renombrados {s['renombradas']} · huérfanas: {len(s['huerfanas'])}"
+        f"papers: {s['notes']} · MOCs: {s['mocs']} · nuevos {s['created']}, "
+        f"actualizados {s['updated']}, sin cambios {s['unchanged']}, "
+        f"renombrados {s['renamed']} · huérfanas: {len(s['orphans'])}"
     )
-    for h in s["huerfanas"]:
+    for h in s["orphans"]:
         _log(f"  huérfana (borra con el CLI --prune): {h}")
 
 

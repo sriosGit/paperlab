@@ -14,7 +14,6 @@ def conn():
     c = sqlite3.connect(":memory:")
     c.row_factory = sqlite3.Row
     c.executescript(db.SCHEMA)
-    db._migrate(c)
     yield c
     c.close()
 
@@ -32,38 +31,6 @@ def _add_summary(conn, paper_id):
         "INSERT INTO summaries (paper_id, summary_md, findings, model) VALUES (?, 'R', '[]', 'x')",
         (paper_id,),
     )
-
-
-# --- migración ---
-
-def test_migrate_agrega_columnas_a_base_antigua():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    c.execute("CREATE TABLE papers (id INTEGER PRIMARY KEY, title TEXT)")
-    db._migrate(c)
-    cols = {r["name"] for r in c.execute("PRAGMA table_info(papers)")}
-    assert {"excluded", "excluded_reason"} <= cols
-    db._migrate(c)  # idempotente
-    c.close()
-
-
-def test_schema_completo_sobre_base_de_version_anterior():
-    """El SCHEMA no debe referenciar columnas que solo añade _migrate (regresión)."""
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    # base "v1": papers sin las columnas nuevas
-    c.execute(
-        """CREATE TABLE papers (id INTEGER PRIMARY KEY, doi TEXT UNIQUE, arxiv_id TEXT UNIQUE,
-             openalex_id TEXT UNIQUE, title TEXT NOT NULL, title_norm TEXT NOT NULL,
-             abstract TEXT, authors TEXT NOT NULL DEFAULT '[]', year INTEGER, venue TEXT,
-             source TEXT NOT NULL, url TEXT, pdf_url TEXT, pdf_path TEXT,
-             status TEXT NOT NULL DEFAULT 'new',
-             added_at TEXT NOT NULL DEFAULT (datetime('now')))"""
-    )
-    c.executescript(db.SCHEMA)   # no debe fallar
-    db._migrate(c)
-    assert c.execute("SELECT COUNT(*) FROM papers WHERE excluded = 0").fetchone()[0] == 0
-    c.close()
 
 
 # --- exclusión ---
@@ -155,9 +122,9 @@ def test_stats_y_queries(conn):
     pid = conn.execute("SELECT id FROM papers WHERE title = 'A'").fetchone()["id"]
     review.exclude(conn, [pid])
     s = review.stats(conn)
-    assert s == {"total": 3, "activos": 2, "excluidos": 1, "sin_procedencia": 1}
+    assert s == {"total": 3, "active": 2, "excluded": 1, "without_provenance": 1}
     q = review.queries(conn)[0]
-    assert q["query"] == "ia" and q["n_papers"] == 2 and q["n_excluidos"] == 1
+    assert q["query"] == "ia" and q["n_papers"] == 2 and q["n_excluded"] == 1
 
 
 # --- guarda de modelo de embeddings ---

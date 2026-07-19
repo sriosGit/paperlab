@@ -2,14 +2,14 @@
 {% block title %}Biblioteca — paperlab{% endblock %}
 {% block content %}
 <h1>
-  {% if excluded %}Papers excluidos <small>{{ counts.excluidos }}</small>
-  {% else %}Biblioteca <small>{{ counts.activos }} papers activos</small>{% endif %}
+  {% if excluded %}Papers excluidos <small>{{ counts.excluded }}</small>
+  {% else %}Biblioteca <small>{{ counts.active }} papers activos</small>{% endif %}
 </h1>
 <p class="meta">
   {% if excluded %}
     Fuera de resúmenes, chat, síntesis y exports. <a href="/">← Ver corpus activo</a>
-  {% elif counts.excluidos %}
-    {{ counts.excluidos }} excluidos · <a href="/?excluded=1">ver excluidos</a>
+  {% elif counts.excluded %}
+    {{ counts.excluded }} excluidos · <a href="/?excluded=1">ver excluidos</a>
   {% endif %}
 </p>
 

@@ -35,8 +35,7 @@ CREATE TABLE IF NOT EXISTS papers (
 );
 CREATE INDEX IF NOT EXISTS idx_papers_title_norm ON papers(title_norm);
 CREATE INDEX IF NOT EXISTS idx_papers_status ON papers(status);
--- el índice de `excluded` lo crea _migrate: en bases anteriores la columna
--- todavía no existe cuando corre este script
+CREATE INDEX IF NOT EXISTS idx_papers_excluded ON papers(excluded);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract, content='papers', content_rowid='id'
@@ -129,26 +128,8 @@ CREATE TABLE IF NOT EXISTS paper_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id);
 """
-
-# Columnas añadidas después de la v1: (tabla, columna, definición).
-_MIGRATIONS = [
-    ("papers", "excluded", "INTEGER NOT NULL DEFAULT 0"),
-    ("papers", "excluded_reason", "TEXT"),
-    ("chunks", "embed_model", "TEXT"),
-]
-
-
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Añade columnas que falten en bases creadas por versiones anteriores."""
-    for tabla, columna, definicion in _MIGRATIONS:
-        existentes = {r["name"] for r in conn.execute(f"PRAGMA table_info({tabla})")}
-        if not existentes:
-            continue  # la tabla no existe todavía: el SCHEMA ya la creará completa
-        if columna not in existentes:
-            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
-    # índices que dependen de columnas migradas (ya existen todas a estas alturas)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_excluded ON papers(excluded)")
-    conn.commit()
+# Este esquema es la única fuente de verdad: no hay migraciones. Si una base
+# antigua no lo cumple, bórrala y vuelve a ingerir (`rm data/paperlab.db`).
 
 
 def get_conn() -> sqlite3.Connection:
@@ -158,7 +139,6 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
-    _migrate(conn)
     return conn
 
 

@@ -63,7 +63,7 @@ def queries(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Resumen por query: cuántos papers trajo y cuántos siguen activos."""
     return conn.execute(
         """SELECT ps.query, COUNT(DISTINCT ps.paper_id) AS n_papers,
-                  SUM(CASE WHEN p.excluded = 1 THEN 1 ELSE 0 END) AS n_excluidos
+                  SUM(CASE WHEN p.excluded = 1 THEN 1 ELSE 0 END) AS n_excluded
            FROM paper_sources ps JOIN papers p ON p.id = ps.paper_id
            GROUP BY ps.query ORDER BY n_papers DESC"""
     ).fetchall()
@@ -77,6 +77,6 @@ def stats(conn: sqlite3.Connection) -> dict:
            WHERE NOT EXISTS (SELECT 1 FROM paper_sources ps WHERE ps.paper_id = p.id)"""
     ).fetchone()[0]
     return {
-        "total": total, "activos": total - excluidos,
-        "excluidos": excluidos, "sin_procedencia": sin_procedencia,
+        "total": total, "active": total - excluidos,
+        "excluded": excluidos, "without_provenance": sin_procedencia,
     }

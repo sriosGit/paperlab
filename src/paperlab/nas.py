@@ -36,14 +36,14 @@ def _client() -> httpx.Client:
 
 def _ensure_collections(client: httpx.Client) -> None:
     """MKCOL de cada segmento de NAS_PDF_DIR (201 creado, 405 ya existía)."""
-    ruta = ""
-    for parte in config.NAS_PDF_DIR.split("/"):
-        ruta = f"{ruta}/{parte}"
-        resp = client.request("MKCOL", ruta)
+    collection_path = ""
+    for part in config.NAS_PDF_DIR.split("/"):
+        collection_path = f"{collection_path}/{part}"
+        resp = client.request("MKCOL", collection_path)
         if resp.status_code == 401:
             raise NasError("el NAS rechazó las credenciales (NAS_USERNAME/NAS_PASSWORD)")
         if resp.status_code not in (201, 405):
-            raise NasError(f"MKCOL {ruta}: HTTP {resp.status_code}")
+            raise NasError(f"MKCOL {collection_path}: HTTP {resp.status_code}")
 
 
 def _list_remote(client: httpx.Client) -> set[str]:
@@ -55,13 +55,13 @@ def _list_remote(client: httpx.Client) -> set[str]:
         return set()
     if resp.status_code != 207:
         raise NasError(f"PROPFIND /{config.NAS_PDF_DIR}: HTTP {resp.status_code}")
-    nombres = {
+    names = {
         unquote(href.text.rstrip("/").rsplit("/", 1)[-1])
         for href in ET.fromstring(resp.content).iter("{DAV:}href")
         if href.text
     }
-    nombres.discard(config.NAS_PDF_DIR.rsplit("/", 1)[-1])  # la colección misma
-    return nombres
+    names.discard(config.NAS_PDF_DIR.rsplit("/", 1)[-1])  # la colección misma
+    return names
 
 
 def sync_pdfs(
@@ -75,37 +75,37 @@ def sync_pdfs(
         raise NasError("configura NAS_BASE_URL, NAS_USERNAME y NAS_PASSWORD en .env")
     config.ensure_dirs()
     rows = conn.execute("SELECT id, pdf_path FROM papers ORDER BY id").fetchall()
-    subidos = en_nas = recuperados = perdidos = 0
+    uploaded = on_nas = restored = missing = 0
     with _client() as client:
         _ensure_collections(client)
-        remotos = _list_remote(client)
+        remote_names = _list_remote(client)
         for row in rows:
-            nombre = f"{row['id']}.pdf"
-            local = Path(row["pdf_path"]) if row["pdf_path"] else None
-            if local and local.exists():
-                if nombre in remotos:
-                    en_nas += 1
+            name = f"{row['id']}.pdf"
+            local_path = Path(row["pdf_path"]) if row["pdf_path"] else None
+            if local_path and local_path.exists():
+                if name in remote_names:
+                    on_nas += 1
                     continue
-                resp = client.put(f"/{config.NAS_PDF_DIR}/{nombre}", content=local.read_bytes())
+                resp = client.put(f"/{config.NAS_PDF_DIR}/{name}", content=local_path.read_bytes())
                 if resp.status_code not in (201, 204):
-                    raise NasError(f"PUT {nombre}: HTTP {resp.status_code}")
-                subidos += 1
-                notify(f"subido {nombre}")
-            elif nombre in remotos and restore:
-                resp = client.get(f"/{config.NAS_PDF_DIR}/{nombre}")
+                    raise NasError(f"PUT {name}: HTTP {resp.status_code}")
+                uploaded += 1
+                notify(f"subido {name}")
+            elif name in remote_names and restore:
+                resp = client.get(f"/{config.NAS_PDF_DIR}/{name}")
                 if resp.status_code != 200:
-                    raise NasError(f"GET {nombre}: HTTP {resp.status_code}")
-                destino = config.PDF_DIR / nombre
-                destino.write_bytes(resp.content)
+                    raise NasError(f"GET {name}: HTTP {resp.status_code}")
+                target = config.PDF_DIR / name
+                target.write_bytes(resp.content)
                 conn.execute(
-                    "UPDATE papers SET pdf_path = ? WHERE id = ?", (str(destino), row["id"])
+                    "UPDATE papers SET pdf_path = ? WHERE id = ?", (str(target), row["id"])
                 )
                 conn.commit()
-                recuperados += 1
-                notify(f"recuperado {nombre}")
-            elif local:  # la BD apunta a un archivo que no está ni local ni en el NAS
-                perdidos += 1
+                restored += 1
+                notify(f"recuperado {name}")
+            elif local_path:  # la BD apunta a un archivo que no está ni local ni en el NAS
+                missing += 1
     return {
-        "subidos": subidos, "ya_en_nas": en_nas,
-        "recuperados": recuperados, "perdidos": perdidos,
+        "uploaded": uploaded, "already_on_nas": on_nas,
+        "restored": restored, "missing": missing,
     }

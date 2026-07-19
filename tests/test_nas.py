@@ -37,9 +37,9 @@ def _mock_client(monkeypatch, handler):
     monkeypatch.setattr(nas, "_client", client)
 
 
-def _propfind_xml(nombres):
+def _propfind_xml(names):
     hrefs = "".join(
-        f"<D:response><D:href>/dav/paperlab/pdfs/{n}</D:href></D:response>" for n in nombres
+        f"<D:response><D:href>/dav/paperlab/pdfs/{n}</D:href></D:response>" for n in names
     )
     return (
         '<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">'
@@ -69,10 +69,10 @@ def test_sync_sube_solo_los_que_faltan(conn, nas_config, monkeypatch):
     local2 = nas_config / "2.pdf"; local2.write_bytes(b"%PDF-2")
     _add_paper(conn, 1, str(local1))
     _add_paper(conn, 2, str(local2))
-    peticiones = []
+    requests = []
 
     def handler(request):
-        peticiones.append((request.method, request.url.path))
+        requests.append((request.method, request.url.path))
         if request.method == "MKCOL":
             return httpx.Response(405)  # ya existían las carpetas
         if request.method == "PROPFIND":
@@ -84,9 +84,9 @@ def test_sync_sube_solo_los_que_faltan(conn, nas_config, monkeypatch):
 
     _mock_client(monkeypatch, handler)
     r = nas.sync_pdfs(conn)
-    assert r == {"subidos": 1, "ya_en_nas": 1, "recuperados": 0, "perdidos": 0}
-    assert ("PUT", "/dav/paperlab/pdfs/1.pdf") in peticiones
-    assert ("MKCOL", "/dav/paperlab") in peticiones  # crea las colecciones por segmento
+    assert r == {"uploaded": 1, "already_on_nas": 1, "restored": 0, "missing": 0}
+    assert ("PUT", "/dav/paperlab/pdfs/1.pdf") in requests
+    assert ("MKCOL", "/dav/paperlab") in requests  # crea las colecciones por segmento
 
 
 def test_restore_recupera_y_actualiza_ruta(conn, nas_config, monkeypatch):
@@ -103,7 +103,7 @@ def test_restore_recupera_y_actualiza_ruta(conn, nas_config, monkeypatch):
 
     _mock_client(monkeypatch, handler)
     r = nas.sync_pdfs(conn, restore=True)
-    assert r["recuperados"] == 1
+    assert r["restored"] == 1
     assert (nas_config / "3.pdf").read_bytes() == b"%PDF-3"
     row = conn.execute("SELECT pdf_path FROM papers WHERE id = 3").fetchone()
     assert row["pdf_path"] == str(nas_config / "3.pdf")
@@ -122,7 +122,7 @@ def test_sin_restore_no_baja_ni_cuenta_perdido(conn, nas_config, monkeypatch):
 
     _mock_client(monkeypatch, handler)
     r = nas.sync_pdfs(conn)
-    assert r == {"subidos": 0, "ya_en_nas": 0, "recuperados": 0, "perdidos": 1}
+    assert r == {"uploaded": 0, "already_on_nas": 0, "restored": 0, "missing": 1}
 
 
 def test_carpeta_remota_inexistente_equivale_a_vacia(conn, nas_config, monkeypatch):
@@ -139,7 +139,7 @@ def test_carpeta_remota_inexistente_equivale_a_vacia(conn, nas_config, monkeypat
         raise AssertionError(request.method)
 
     _mock_client(monkeypatch, handler)
-    assert nas.sync_pdfs(conn)["subidos"] == 1
+    assert nas.sync_pdfs(conn)["uploaded"] == 1
 
 
 def test_credenciales_invalidas_dan_error_claro(conn, nas_config, monkeypatch):

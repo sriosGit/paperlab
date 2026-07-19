@@ -89,7 +89,7 @@ def fetch_pdfs(conn: sqlite3.Connection, limit: int | None = None, retry: bool =
                 )
             conn.commit()
             ok += 1
-    return {"descargados": ok, "fallidos": failed, "sin_url": no_url, "pendientes": len(rows)}
+    return {"downloaded": ok, "failed": failed, "no_url": no_url, "pending": len(rows)}
 
 
 def extract_text(pdf_path: str) -> str:

@@ -16,18 +16,18 @@ from pathlib import Path
 
 from .. import db
 
-MARCADOR = "%% paperlab: todo lo anterior se regenera en cada export. Escribe solo debajo. %%"
-SECCION_USUARIO_DEFAULT = "\n## Mis notas\n\n"
+MARKER = "%% paperlab: todo lo anterior se regenera en cada export. Escribe solo debajo. %%"
+DEFAULT_USER_SECTION = "\n## Mis notas\n\n"
 
-_ILEGALES = re.compile(r'[\\/:*?"<>|\[\]#^]')
+_ILLEGAL = re.compile(r'[\\/:*?"<>|\[\]#^]')
 _FRONTMATTER_ID = re.compile(r"^paperlab_id:\s*(\d+)\s*$", re.MULTILINE)
 
 
-def sanitize_filename(titulo: str) -> str:
+def sanitize_filename(title: str) -> str:
     """Nombre seguro para cualquier SO y válido dentro de un wikilink."""
-    limpio = _ILEGALES.sub(" ", titulo)
-    limpio = re.sub(r"\s+", " ", limpio).strip()
-    return limpio.strip(". ")
+    clean = _ILLEGAL.sub(" ", title)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean.strip(". ")
 
 
 def build_note_names(papers: list[sqlite3.Row]) -> dict[int, str]:
@@ -36,48 +36,48 @@ def build_note_names(papers: list[sqlite3.Row]) -> dict[int, str]:
     Los papers llegan ordenados por id (inmutable), así que ante títulos
     repetidos el sufijo con id siempre cae en los mismos papers.
     """
-    nombres: dict[int, str] = {}
-    usados: set[str] = set()
+    names: dict[int, str] = {}
+    used: set[str] = set()
     for p in papers:
         year = p["year"] if p["year"] else "s-f"
         base = f"{year} - {sanitize_filename(p['title'])[:80].strip('. ')}"
-        nombre = base if base not in usados else f"{base} (paperlab-{p['id']})"
-        usados.add(nombre)
-        nombres[p["id"]] = nombre
-    return nombres
+        name = base if base not in used else f"{base} (paperlab-{p['id']})"
+        used.add(name)
+        names[p["id"]] = name
+    return names
 
 
-def load_citas_locales(conn: sqlite3.Connection) -> tuple[dict[int, list[int]], dict[int, int]]:
+def load_local_citations(conn: sqlite3.Connection) -> tuple[dict[int, list[int]], dict[int, int]]:
     """(paper_id -> ids citados presentes en la biblioteca, paper_id -> nº de refs externas)."""
-    locales: dict[int, list[int]] = {}
+    local_cites: dict[int, list[int]] = {}
     for row in conn.execute(
         """SELECT c.paper_id, p.id AS cited_id
            FROM citations c JOIN papers p ON p.openalex_id = c.cited_openalex_id
            WHERE p.id != c.paper_id
            ORDER BY c.paper_id, p.id"""
     ):
-        locales.setdefault(row["paper_id"], []).append(row["cited_id"])
-    externas: dict[int, int] = {}
+        local_cites.setdefault(row["paper_id"], []).append(row["cited_id"])
+    external_refs: dict[int, int] = {}
     for row in conn.execute(
         """SELECT c.paper_id, COUNT(*) AS n
            FROM citations c LEFT JOIN papers p ON p.openalex_id = c.cited_openalex_id
            WHERE p.id IS NULL
            GROUP BY c.paper_id"""
     ):
-        externas[row["paper_id"]] = row["n"]
-    return locales, externas
+        external_refs[row["paper_id"]] = row["n"]
+    return local_cites, external_refs
 
 
-def _texto_limpio(valor: str | None) -> str:
+def _clean_text(value: str | None) -> str:
     """Normaliza campos de resumen.
 
     Algunos resúmenes viejos guardan `str(lista)` de Python (el LLM devolvió una
     lista y analyze.py la stringificó), quedando como "['frase', 'frase']". Se
     detecta y se une en párrafo; el resto se devuelve tal cual.
     """
-    if not valor:
+    if not value:
         return ""
-    s = valor.strip()
+    s = value.strip()
     if s.startswith("[") and s.endswith("]"):
         try:
             items = ast.literal_eval(s)
@@ -88,9 +88,9 @@ def _texto_limpio(valor: str | None) -> str:
     return s
 
 
-def _yaml_str(valor: str) -> str:
+def _yaml_str(value: str) -> str:
     # Un string JSON es un string YAML válido: escapado gratis sin dependencia nueva.
-    return json.dumps(valor, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False)
 
 
 def render_frontmatter(paper: sqlite3.Row, summary: sqlite3.Row | None) -> str:
@@ -101,96 +101,96 @@ def render_frontmatter(paper: sqlite3.Row, summary: sqlite3.Row | None) -> str:
         aliases.append(f"arXiv:{paper['arxiv_id']}")
     if paper["openalex_id"]:
         aliases.append(paper["openalex_id"])
-    autores = json.loads(paper["authors"] or "[]")
+    authors_list = json.loads(paper["authors"] or "[]")
 
-    lineas = ["---", f"paperlab_id: {paper['id']}", f"title: {_yaml_str(paper['title'])}"]
+    lines = ["---", f"paperlab_id: {paper['id']}", f"title: {_yaml_str(paper['title'])}"]
     if aliases:
-        lineas.append(f"aliases: [{', '.join(_yaml_str(a) for a in aliases)}]")
-    if autores:
-        lineas.append(f"authors: [{', '.join(_yaml_str(a) for a in autores)}]")
+        lines.append(f"aliases: [{', '.join(_yaml_str(a) for a in aliases)}]")
+    if authors_list:
+        lines.append(f"authors: [{', '.join(_yaml_str(a) for a in authors_list)}]")
     if paper["year"]:
-        lineas.append(f"year: {paper['year']}")
-    for campo in ("venue", "doi", "arxiv_id", "openalex_id", "url", "source"):
-        if paper[campo]:
-            lineas.append(f"{campo}: {_yaml_str(paper[campo])}")
-    lineas.append(f"estado: {_yaml_str(paper['status'])}")
+        lines.append(f"year: {paper['year']}")
+    for field in ("venue", "doi", "arxiv_id", "openalex_id", "url", "source"):
+        if paper[field]:
+            lines.append(f"{field}: {_yaml_str(paper[field])}")
+    lines.append(f"estado: {_yaml_str(paper['status'])}")
     if paper["added_at"]:
-        lineas.append(f"añadido: {paper['added_at'][:10]}")
+        lines.append(f"añadido: {paper['added_at'][:10]}")
     if summary and summary["model"]:
-        lineas.append(f"modelo: {_yaml_str(summary['model'])}")
-    lineas.append("tags: [paper]")
-    lineas.append("---")
-    return "\n".join(lineas)
+        lines.append(f"modelo: {_yaml_str(summary['model'])}")
+    lines.append("tags: [paper]")
+    lines.append("---")
+    return "\n".join(lines)
 
 
 def render_note(
     paper: sqlite3.Row,
     summary: sqlite3.Row | None,
-    nombres_citados: list[str],
-    n_externas: int,
-    seccion_usuario: str,
+    cited_names: list[str],
+    n_external: int,
+    user_section: str,
 ) -> str:
-    partes = [render_frontmatter(paper, summary), "", f"# {paper['title']}"]
+    parts = [render_frontmatter(paper, summary), "", f"# {paper['title']}"]
 
     if summary:
-        partes += ["", "## Resumen", "", _texto_limpio(summary["summary_md"])]
-        hallazgos = json.loads(summary["findings"] or "[]")
-        if hallazgos:
-            partes += ["", "## Hallazgos", ""] + [f"- {h}" for h in hallazgos]
-        for titulo, campo in (("Método", "method"), ("Limitaciones", "limitations"), ("Relevancia", "relevance")):
-            texto = _texto_limpio(summary[campo])
-            if texto:
-                partes += ["", f"## {titulo}", "", texto]
+        parts += ["", "## Resumen", "", _clean_text(summary["summary_md"])]
+        findings_list = json.loads(summary["findings"] or "[]")
+        if findings_list:
+            parts += ["", "## Hallazgos", ""] + [f"- {h}" for h in findings_list]
+        for title, field in (("Método", "method"), ("Limitaciones", "limitations"), ("Relevancia", "relevance")):
+            text = _clean_text(summary[field])
+            if text:
+                parts += ["", f"## {title}", "", text]
     elif paper["abstract"]:
-        partes += ["", "## Abstract", "", paper["abstract"].strip()]
+        parts += ["", "## Abstract", "", paper["abstract"].strip()]
 
-    if nombres_citados or n_externas:
-        partes += ["", "## Citas", ""]
-        partes += [f"- [[{n}]]" for n in nombres_citados]
-        if n_externas:
-            if nombres_citados:
-                partes.append("")
-            partes.append(f"*(y {n_externas} referencias externas fuera de la biblioteca)*")
+    if cited_names or n_external:
+        parts += ["", "## Citas", ""]
+        parts += [f"- [[{n}]]" for n in cited_names]
+        if n_external:
+            if cited_names:
+                parts.append("")
+            parts.append(f"*(y {n_external} referencias externas fuera de la biblioteca)*")
 
-    partes += ["", MARCADOR]
-    return "\n".join(partes) + (seccion_usuario or SECCION_USUARIO_DEFAULT)
+    parts += ["", MARKER]
+    return "\n".join(parts) + (user_section or DEFAULT_USER_SECTION)
 
 
-def extract_seccion_usuario(path: Path) -> str | None:
+def extract_user_section(path: Path) -> str | None:
     """Texto posterior al MARCADOR de una nota existente; None si no hay marcador."""
     try:
-        contenido = path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
     except OSError:
         return None
-    if MARCADOR not in contenido:
+    if MARKER not in content:
         return None
-    return contenido.split(MARCADOR, 1)[1]
+    return content.split(MARKER, 1)[1]
 
 
-def write_if_changed(path: Path, contenido: str) -> bool:
+def write_if_changed(path: Path, content: str) -> bool:
     """Escribe solo si el contenido cambió (evita churn de sync en LiveSync)."""
     try:
-        if path.read_text(encoding="utf-8") == contenido:
+        if path.read_text(encoding="utf-8") == content:
             return False
     except OSError:
         pass
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contenido, encoding="utf-8")
+    path.write_text(content, encoding="utf-8")
     return True
 
 
-def _leer_paperlab_id(path: Path) -> int | None:
+def _read_paperlab_id(path: Path) -> int | None:
     try:
-        cabeza = path.read_text(encoding="utf-8")[:2000]
+        head = path.read_text(encoding="utf-8")[:2000]
     except OSError:
         return None
-    if not cabeza.startswith("---"):
+    if not head.startswith("---"):
         return None
-    m = _FRONTMATTER_ID.search(cabeza)
+    m = _FRONTMATTER_ID.search(head)
     return int(m.group(1)) if m else None
 
 
-def papers_de_busqueda(conn: sqlite3.Connection, query: str) -> list[int]:
+def papers_for_query(conn: sqlite3.Connection, query: str) -> list[int]:
     """Ids de papers locales que matchean la búsqueda (FTS5, por relevancia)."""
     try:
         rows = conn.execute(
@@ -202,35 +202,35 @@ def papers_de_busqueda(conn: sqlite3.Connection, query: str) -> list[int]:
     return [r["rowid"] for r in rows]
 
 
-def render_moc(busqueda: sqlite3.Row, nombres: list[str], seccion_usuario: str) -> str:
-    lineas = [
+def render_moc(search_row: sqlite3.Row, names: list[str], user_section: str) -> str:
+    lines = [
         "---",
-        f"busqueda: {_yaml_str(busqueda['query'])}",
+        f"busqueda: {_yaml_str(search_row['query'])}",
         "tags: [moc]",
         "---",
         "",
-        f"# MOC - {busqueda['name']}",
+        f"# MOC - {search_row['name']}",
         "",
-        f"Papers locales que matchean `{busqueda['query']}` ({len(nombres)}):",
+        f"Papers locales que matchean `{search_row['query']}` ({len(names)}):",
         "",
     ]
-    lineas += [f"- [[{n}]]" for n in nombres]
-    lineas += ["", MARCADOR]
-    return "\n".join(lineas) + (seccion_usuario or SECCION_USUARIO_DEFAULT)
+    lines += [f"- [[{n}]]" for n in names]
+    lines += ["", MARKER]
+    return "\n".join(lines) + (user_section or DEFAULT_USER_SECTION)
 
 
-def render_indice(papers: list[sqlite3.Row], nombres: dict[int, str], seccion_usuario: str) -> str:
-    lineas = ["---", "tags: [moc]", "---", "", "# Índice de papers", ""]
-    por_year: dict[object, list[sqlite3.Row]] = {}
+def render_index(papers: list[sqlite3.Row], names: dict[int, str], user_section: str) -> str:
+    lines = ["---", "tags: [moc]", "---", "", "# Índice de papers", ""]
+    by_year: dict[object, list[sqlite3.Row]] = {}
     for p in papers:
-        por_year.setdefault(p["year"], []).append(p)
-    con_year = sorted((y for y in por_year if y), reverse=True)
-    for y in con_year + ([None] if None in por_year else []):
-        lineas += [f"## {y or 'Sin fecha'}", ""]
-        lineas += [f"- [[{nombres[p['id']]}]]" for p in por_year[y]]
-        lineas.append("")
-    lineas += [MARCADOR]
-    return "\n".join(lineas) + (seccion_usuario or SECCION_USUARIO_DEFAULT)
+        by_year.setdefault(p["year"], []).append(p)
+    with_year = sorted((y for y in by_year if y), reverse=True)
+    for y in with_year + ([None] if None in by_year else []):
+        lines += [f"## {y or 'Sin fecha'}", ""]
+        lines += [f"- [[{names[p['id']]}]]" for p in by_year[y]]
+        lines.append("")
+    lines += [MARKER]
+    return "\n".join(lines) + (user_section or DEFAULT_USER_SECTION)
 
 
 def export_vault(
@@ -244,90 +244,90 @@ def export_vault(
 
     papers = conn.execute("SELECT * FROM papers WHERE excluded = 0 ORDER BY id").fetchall()
     summaries = {r["paper_id"]: r for r in conn.execute("SELECT * FROM summaries")}
-    nombres = build_note_names(papers)
-    citas, externas = load_citas_locales(conn)
+    names = build_note_names(papers)
+    cites, external_refs = load_local_citations(conn)
 
     # Notas existentes gestionadas por paperlab (con paperlab_id en frontmatter).
-    existentes: dict[int, Path] = {}
+    existing: dict[int, Path] = {}
     for f in sorted(papers_dir.glob("*.md")) if papers_dir.is_dir() else []:
-        pid = _leer_paperlab_id(f)
+        pid = _read_paperlab_id(f)
         if pid is not None:
-            existentes[pid] = f
+            existing[pid] = f
 
     stats = {
-        "notas": len(papers), "nuevas": 0, "actualizadas": 0, "sin_cambios": 0,
-        "renombradas": 0, "citas_locales": sum(len(v) for v in citas.values()),
-        "refs_externas": sum(externas.values()), "mocs": 0,
-        "huerfanas": [], "podadas": 0, "sin_marcador": [],
+        "notes": len(papers), "created": 0, "updated": 0, "unchanged": 0,
+        "renamed": 0, "local_citations": sum(len(v) for v in cites.values()),
+        "external_refs": sum(external_refs.values()), "mocs": 0,
+        "orphans": [], "pruned": 0, "without_marker": [],
     }
 
-    def _escribir(path: Path, contenido: str, existia: bool) -> None:
+    def _write(path: Path, content: str, existed: bool) -> None:
         try:
-            actual = path.read_text(encoding="utf-8")
+            current = path.read_text(encoding="utf-8")
         except OSError:
-            actual = None
-        if actual == contenido:
-            stats["sin_cambios"] += 1
+            current = None
+        if current == content:
+            stats["unchanged"] += 1
             return
         if not dry_run:
-            write_if_changed(path, contenido)
-        if existia:
-            stats["actualizadas"] += 1
+            write_if_changed(path, content)
+        if existed:
+            stats["updated"] += 1
         else:
-            stats["nuevas"] += 1
+            stats["created"] += 1
 
     for p in papers:
-        destino = papers_dir / f"{nombres[p['id']]}.md"
-        previa = existentes.get(p["id"])
-        seccion = None
-        if previa is not None:
-            seccion = extract_seccion_usuario(previa)
-            if seccion is None and previa.exists():
+        target = papers_dir / f"{names[p['id']]}.md"
+        previous = existing.get(p["id"])
+        section = None
+        if previous is not None:
+            section = extract_user_section(previous)
+            if section is None and previous.exists():
                 # Sin marcador no se distingue lo gestionado de lo del usuario:
                 # se preserva el cuerpo completo previo para no perder nada.
-                stats["sin_marcador"].append(previa.name)
-                viejo = previa.read_text(encoding="utf-8")
-                cuerpo = viejo.split("---", 2)[2] if viejo.startswith("---") else viejo
-                seccion = (
+                stats["without_marker"].append(previous.name)
+                old = previous.read_text(encoding="utf-8")
+                body = old.split("---", 2)[2] if old.startswith("---") else old
+                section = (
                     "\n## Mis notas\n\n"
                     "> [!warning] Nota previa sin marcador de paperlab; contenido preservado íntegro:\n\n"
-                    + cuerpo.strip() + "\n"
+                    + body.strip() + "\n"
                 )
-        contenido = render_note(
+        content = render_note(
             p, summaries.get(p["id"]),
-            [nombres[c] for c in citas.get(p["id"], [])],
-            externas.get(p["id"], 0),
-            seccion or "",
+            [names[c] for c in cites.get(p["id"], [])],
+            external_refs.get(p["id"], 0),
+            section or "",
         )
-        _escribir(destino, contenido, existia=previa is not None)
-        if previa is not None and previa != destino:
-            stats["renombradas"] += 1
+        _write(target, content, existed=previous is not None)
+        if previous is not None and previous != target:
+            stats["renamed"] += 1
             if not dry_run:
-                previa.unlink(missing_ok=True)
+                previous.unlink(missing_ok=True)
 
     # Huérfanas: notas gestionadas cuyo paper ya no está en la BD.
-    ids_bd = {p["id"] for p in papers}
-    for pid, f in existentes.items():
-        if pid not in ids_bd:
+    db_ids = {p["id"] for p in papers}
+    for pid, f in existing.items():
+        if pid not in db_ids:
             if prune and not dry_run:
                 f.unlink(missing_ok=True)
-                stats["podadas"] += 1
+                stats["pruned"] += 1
             else:
-                stats["huerfanas"].append(f.name)
+                stats["orphans"].append(f.name)
 
     # MOCs por búsqueda guardada + índice global.
     for b in conn.execute("SELECT * FROM saved_searches ORDER BY id"):
-        ids = [i for i in papers_de_busqueda(conn, b["query"]) if i in nombres]
-        destino = moc_dir / f"MOC - {sanitize_filename(b['name'])}.md"
-        contenido = render_moc(b, [nombres[i] for i in ids], extract_seccion_usuario(destino) or "")
-        _escribir(destino, contenido, existia=destino.exists())
+        ids = [i for i in papers_for_query(conn, b["query"]) if i in names]
+        target = moc_dir / f"MOC - {sanitize_filename(b['name'])}.md"
+        content = render_moc(b, [names[i] for i in ids], extract_user_section(target) or "")
+        _write(target, content, existed=target.exists())
         stats["mocs"] += 1
 
-    destino = moc_dir / "Índice de papers.md"
-    contenido = render_indice(papers, nombres, extract_seccion_usuario(destino) or "")
-    _escribir(destino, contenido, existia=destino.exists())
+    target = moc_dir / "Índice de papers.md"
+    content = render_index(papers, names, extract_user_section(target) or "")
+    _write(target, content, existed=target.exists())
     stats["mocs"] += 1
 
-    for nombre in stats["sin_marcador"]:
-        print(f"⚠ {nombre}: sin marcador de paperlab; se regeneró sin descartar (revisar duplicados)", file=sys.stderr)
+    for name in stats["without_marker"]:
+        print(f"⚠ {name}: sin marcador de paperlab; se regeneró sin descartar (revisar duplicados)", file=sys.stderr)
     return stats

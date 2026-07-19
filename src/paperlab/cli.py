@@ -43,24 +43,24 @@ def relocate_pdfs():
     conn = db.get_conn()
     config.ensure_dirs()
     rows = conn.execute("SELECT id, pdf_path FROM papers WHERE pdf_path IS NOT NULL").fetchall()
-    movidos = en_sitio = perdidos = 0
+    moved = already_there = missing = 0
     for row in rows:
-        actual = Path(row["pdf_path"])
-        destino = config.PDF_DIR / actual.name
-        if actual == destino:
-            en_sitio += 1
+        current = Path(row["pdf_path"])
+        target = config.PDF_DIR / current.name
+        if current == target:
+            already_there += 1
             continue
-        if actual.exists():
-            shutil.move(str(actual), destino)
-        elif not destino.exists():
-            typer.echo(f"  paper {row['id']}: PDF perdido ({actual})", err=True)
-            perdidos += 1
+        if current.exists():
+            shutil.move(str(current), target)
+        elif not target.exists():
+            typer.echo(f"  paper {row['id']}: PDF perdido ({current})", err=True)
+            missing += 1
             continue
-        conn.execute("UPDATE papers SET pdf_path = ? WHERE id = ?", (str(destino), row["id"]))
-        movidos += 1
+        conn.execute("UPDATE papers SET pdf_path = ? WHERE id = ?", (str(target), row["id"]))
+        moved += 1
     conn.commit()
     typer.echo(f"destino: {config.PDF_DIR}")
-    typer.echo(f"movidos: {movidos} · ya en sitio: {en_sitio} · perdidos: {perdidos}")
+    typer.echo(f"movidos: {moved} · ya en sitio: {already_there} · perdidos: {missing}")
 
 
 @app.command()
@@ -71,10 +71,10 @@ def process(no_embed: bool = typer.Option(False, "--no-embed", help="Solo trocea
     typer.echo(f"papers troceados: {n}")
     if no_embed:
         return
-    obsoletos = analyze.stale_embeddings(conn)
-    if obsoletos:
+    stale = analyze.stale_embeddings(conn)
+    if stale:
         typer.echo(
-            f"↻ {obsoletos} chunks tienen embeddings de otro modelo: "
+            f"↻ {stale} chunks tienen embeddings de otro modelo: "
             f"se recalculan con {config.OLLAMA_EMBED_MODEL}"
         )
     try:
@@ -139,16 +139,16 @@ def _print_synthesis(s: "synthesize.Synthesis") -> None:
     a = s.audit
     if a:
         typer.echo(
-            f"\nCitas: {len(a.citadas)}/{a.n_sources} fuentes citadas "
-            f"({a.cobertura:.0%} de cobertura)"
+            f"\nCitas: {len(a.cited)}/{a.n_sources} fuentes citadas "
+            f"({a.coverage:.0%} de cobertura)"
         )
-        if a.fuera_de_rango:
+        if a.out_of_range:
             typer.echo(
-                f"  ⚠ citas a fuentes inexistentes: {a.fuera_de_rango}", err=True
+                f"  ⚠ citas a fuentes inexistentes: {a.out_of_range}", err=True
             )
-        if a.secciones_sin_citas:
+        if a.sections_without_citations:
             typer.echo(
-                f"  ⚠ secciones sin ninguna cita: {', '.join(a.secciones_sin_citas)}", err=True
+                f"  ⚠ secciones sin ninguna cita: {', '.join(a.sections_without_citations)}", err=True
             )
 
 
@@ -208,8 +208,8 @@ def stats():
         "SELECT COALESCE(embed_model, '(desconocido)') m, COUNT(*) n FROM chunks "
         "WHERE embedding IS NOT NULL GROUP BY m"
     ):
-        marca = "" if r["m"] == config.OLLAMA_EMBED_MODEL else "  ← obsoleto, se recalculará"
-        typer.echo(f"  embeddings de {r['m']}: {r['n']}{marca}")
+        mark = "" if r["m"] == config.OLLAMA_EMBED_MODEL else "  ← obsoleto, se recalculará"
+        typer.echo(f"  embeddings de {r['m']}: {r['n']}{mark}")
     typer.echo(f"resúmenes: {summaries}")
     typer.echo(f"ollama disponible: {'sí' if llm.is_available() else 'NO'}")
 
@@ -249,26 +249,26 @@ def review_cmd(
             "SELECT id, title, excluded_reason FROM papers WHERE excluded = 1 ORDER BY id"
         ).fetchall()
         for r in rows:
-            motivo = f" — {r['excluded_reason']}" if r["excluded_reason"] else ""
-            typer.echo(f"  #{r['id']} {r['title'][:80]}{motivo}")
+            reason = f" — {r['excluded_reason']}" if r["excluded_reason"] else ""
+            typer.echo(f"  #{r['id']} {r['title'][:80]}{reason}")
         typer.echo(f"total excluidos: {len(rows)}")
         return
     if query:
         rows = review.by_query(conn, query, only_from_this=only_from_this)
         for r in rows:
-            marca = "✗" if r["excluded"] else " "
-            typer.echo(f" {marca} #{r['id']} {r['title'][:80]}")
+            mark = "✗" if r["excluded"] else " "
+            typer.echo(f" {mark} #{r['id']} {r['title'][:80]}")
         typer.echo(f"total: {len(rows)} papers de «{query}»")
         typer.echo("descarta con: paperlab exclude <ids> --reason «fuera de tema»")
         return
     s = review.stats(conn)
     typer.echo(
-        f"papers: {s['total']} · activos: {s['activos']} · excluidos: {s['excluidos']} · "
-        f"sin procedencia registrada: {s['sin_procedencia']}"
+        f"papers: {s['total']} · activos: {s['active']} · excluidos: {s['excluded']} · "
+        f"sin procedencia registrada: {s['without_provenance']}"
     )
     typer.echo("\nPor búsqueda:")
     for r in review.queries(conn):
-        typer.echo(f"  {r['n_papers']:4d} papers ({r['n_excluidos']} excluidos)  «{r['query']}»")
+        typer.echo(f"  {r['n_papers']:4d} papers ({r['n_excluded']} excluidos)  «{r['query']}»")
 
 
 @app.command(name="enrich-openalex")
@@ -278,38 +278,38 @@ def enrich_openalex(limit: int = typer.Option(None, help="Máximo de papers a en
     from .ingest.base import store_papers
 
     conn = db.get_conn()
-    pendientes = conn.execute(
+    pending = conn.execute(
         """SELECT id, doi, arxiv_id FROM papers
            WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
              AND excluded = 0
            ORDER BY id"""
     ).fetchall()
     if limit:
-        pendientes = pendientes[:limit]
-    if not pendientes:
+        pending = pending[:limit]
+    if not pending:
         typer.echo("no hay papers con DOI/arXiv pendientes de enriquecer")
         return
 
-    citas_antes = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
-    enriquecidos = fallidos = 0
-    for i, row in enumerate(pendientes, 1):
+    cites_before = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    enriched = failed = 0
+    for i, row in enumerate(pending, 1):
         try:
             paper = openalex.fetch_by_ids(row["doi"], row["arxiv_id"])
         except Exception as exc:  # noqa: BLE001 — un paper no debe tumbar el lote
-            typer.echo(f"[{i}/{len(pendientes)}] paper {row['id']}: ERROR {exc}", err=True)
-            fallidos += 1
+            typer.echo(f"[{i}/{len(pending)}] paper {row['id']}: ERROR {exc}", err=True)
+            failed += 1
             continue
         if paper and paper.openalex_id:
             store_papers(conn, [paper])
-            enriquecidos += 1
+            enriched += 1
         else:
-            fallidos += 1
-        typer.echo(f"[{i}/{len(pendientes)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
+            failed += 1
+        typer.echo(f"[{i}/{len(pending)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
 
-    citas_despues = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    cites_after = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
     typer.echo(
-        f"enriquecidos: {enriquecidos} · sin match/error: {fallidos} · "
-        f"citas nuevas: {citas_despues - citas_antes}"
+        f"enriquecidos: {enriched} · sin match/error: {failed} · "
+        f"citas nuevas: {cites_after - cites_before}"
     )
 
 
@@ -322,21 +322,21 @@ def export_obsidian(
     """Exporta la biblioteca al vault de Obsidian (notas, wikilinks de citas y MOCs)."""
     from .export import obsidian
 
-    destino = vault or config.OBSIDIAN_VAULT_PATH
-    if destino is None:
+    target = vault or config.OBSIDIAN_VAULT_PATH
+    if target is None:
         typer.echo("ERROR: define OBSIDIAN_VAULT_PATH en .env o pasa --vault", err=True)
         raise typer.Exit(1)
     conn = db.get_conn()
-    s = obsidian.export_vault(conn, destino, prune=prune, dry_run=dry_run)
-    prefijo = "[dry-run] " if dry_run else ""
+    s = obsidian.export_vault(conn, target, prune=prune, dry_run=dry_run)
+    prefix = "[dry-run] " if dry_run else ""
     typer.echo(
-        f"{prefijo}papers: {s['notas']} · MOCs: {s['mocs']} · "
-        f"archivos nuevos {s['nuevas']}, actualizados {s['actualizadas']}, "
-        f"sin cambios {s['sin_cambios']}, renombrados {s['renombradas']} · "
-        f"citas locales: {s['citas_locales']} · refs externas: {s['refs_externas']} · "
-        f"huérfanas: {len(s['huerfanas'])} · podadas: {s['podadas']}"
+        f"{prefix}papers: {s['notes']} · MOCs: {s['mocs']} · "
+        f"archivos nuevos {s['created']}, actualizados {s['updated']}, "
+        f"sin cambios {s['unchanged']}, renombrados {s['renamed']} · "
+        f"citas locales: {s['local_citations']} · refs externas: {s['external_refs']} · "
+        f"huérfanas: {len(s['orphans'])} · podadas: {s['pruned']}"
     )
-    for h in s["huerfanas"]:
+    for h in s["orphans"]:
         typer.echo(f"  huérfana (usa --prune para borrar): {h}")
 
 
@@ -354,8 +354,8 @@ def sync_nas(
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(
-        f"subidos: {r['subidos']} · ya en NAS: {r['ya_en_nas']} · "
-        f"recuperados: {r['recuperados']} · perdidos: {r['perdidos']}"
+        f"subidos: {r['uploaded']} · ya en NAS: {r['already_on_nas']} · "
+        f"recuperados: {r['restored']} · perdidos: {r['missing']}"
     )
 
 

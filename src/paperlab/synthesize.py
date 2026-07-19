@@ -87,21 +87,21 @@ class CitationAudit:
     """Estado de las citas [n] de una síntesis frente a sus fuentes reales."""
 
     n_sources: int
-    citadas: set[int] = field(default_factory=set)
-    fuera_de_rango: list[int] = field(default_factory=list)
-    secciones_sin_citas: list[str] = field(default_factory=list)
+    cited: set[int] = field(default_factory=set)
+    out_of_range: list[int] = field(default_factory=list)
+    sections_without_citations: list[str] = field(default_factory=list)
 
     @property
-    def sin_citar(self) -> int:
-        return self.n_sources - len(self.citadas)
+    def uncited(self) -> int:
+        return self.n_sources - len(self.cited)
 
     @property
-    def cobertura(self) -> float:
-        return len(self.citadas) / self.n_sources if self.n_sources else 0.0
+    def coverage(self) -> float:
+        return len(self.cited) / self.n_sources if self.n_sources else 0.0
 
     @property
     def ok(self) -> bool:
-        return not self.fuera_de_rango and not self.secciones_sin_citas
+        return not self.out_of_range and not self.sections_without_citations
 
 
 _CITA = re.compile(r"\[(\d+)\]")
@@ -119,15 +119,15 @@ def audit_citations(sections: dict, n_sources: int) -> CitationAudit:
         value = sections.get(key)
         if not value:
             continue
-        texto = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-        nums = [int(n) for n in _CITA.findall(texto)]
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        nums = [int(n) for n in _CITA.findall(text)]
         if not nums:
-            audit.secciones_sin_citas.append(key)
+            audit.sections_without_citations.append(key)
         for n in nums:
             if 1 <= n <= n_sources:
-                audit.citadas.add(n)
-            elif n not in audit.fuera_de_rango:
-                audit.fuera_de_rango.append(n)
+                audit.cited.add(n)
+            elif n not in audit.out_of_range:
+                audit.out_of_range.append(n)
     return audit
 
 
@@ -202,15 +202,15 @@ def build_dossiers(
         if row is None:
             continue
         try:
-            hallazgos = json.loads(row["findings"] or "[]")
+            findings_list = json.loads(row["findings"] or "[]")
         except json.JSONDecodeError:
-            hallazgos = []
+            findings_list = []
         n = start_n + len(sources)
         parts = [f"[{n}] {row['title']} ({row['year'] or 's.f.'}{', ' + row['venue'] if row['venue'] else ''})"]
         if row["summary_md"]:
             parts.append(f"Resumen: {_clip(row['summary_md'], 500)}")
-        if hallazgos:
-            parts.append("Hallazgos: " + "; ".join(str(h) for h in hallazgos[:5]))
+        if findings_list:
+            parts.append("Hallazgos: " + "; ".join(str(h) for h in findings_list[:5]))
         if row["method"]:
             parts.append(f"Método: {_clip(row['method'], 300)}")
         if row["limitations"]:
@@ -297,16 +297,16 @@ def _reduce(
     partials: list[dict], topic: str | None, notify: Callable[[str], None]
 ) -> dict:
     """Combina análisis parciales [{first, last, sections}] en rondas hasta dejar uno."""
-    ronda = 0
+    round_ = 0
     while len(partials) > 1:
-        ronda += 1
-        siguientes: list[dict] = []
+        round_ += 1
+        next_round: list[dict] = []
         for i in range(0, len(partials), REDUCE_GROUP):
             group = partials[i : i + REDUCE_GROUP]
             if len(group) == 1:
-                siguientes.append(group[0])
+                next_round.append(group[0])
                 continue
-            notify(f"reducción (ronda {ronda}): combinando {len(group)} análisis parciales…")
+            notify(f"reducción (ronda {round_}): combinando {len(group)} análisis parciales…")
             blocks = "\n\n".join(
                 f"### Análisis de los papers [{p['first']}]–[{p['last']}]\n"
                 + json.dumps(p["sections"], ensure_ascii=False)
@@ -316,11 +316,11 @@ def _reduce(
                 REDUCE_PROMPT.format(topic_line=_topic_line(topic), partials=blocks),
                 system=SYNTHESIS_SYSTEM,
             )
-            siguientes.append(
+            next_round.append(
                 {"first": group[0]["first"], "last": group[-1]["last"],
                  "sections": _normalize(data)}
             )
-        partials = siguientes
+        partials = next_round
     return partials[0]["sections"]
 
 

@@ -32,19 +32,19 @@ def _row(conn, id):
 # --- cadena de candidatos ---
 
 def test_candidatos_en_orden_y_lazy(conn, monkeypatch):
-    llamadas = []
+    calls = []
     monkeypatch.setattr(pdf_mod.unpaywall, "find_pdf_url",
-                        lambda doi: llamadas.append("unpaywall") or "http://up/x.pdf")
+                        lambda doi: calls.append("unpaywall") or "http://up/x.pdf")
     monkeypatch.setattr(pdf_mod.semanticscholar, "find_pdf_url",
-                        lambda doi: llamadas.append("s2") or "http://s2/x.pdf")
+                        lambda doi: calls.append("s2") or "http://s2/x.pdf")
     _add_paper(conn, id=1, pdf_url="http://oa/x.pdf", arxiv_id="2401.1", doi="10.1/x")
     gen = pdf_mod._candidate_urls(_row(conn, 1))
     assert next(gen) == "http://oa/x.pdf"
     assert next(gen) == "https://arxiv.org/pdf/2401.1"
-    assert llamadas == []  # las APIs no se tocan hasta necesitarlas
+    assert calls == []  # las APIs no se tocan hasta necesitarlas
     assert next(gen) == "http://up/x.pdf"
     assert next(gen) == "http://s2/x.pdf"
-    assert llamadas == ["unpaywall", "s2"]
+    assert calls == ["unpaywall", "s2"]
 
 
 def test_candidatos_omite_apis_sin_respuesta(conn, monkeypatch):
@@ -62,9 +62,9 @@ def pdf_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _fake_download(respuestas: dict):
+def _fake_download(responses: dict):
     """_download simulado: url -> bytes o None."""
-    return lambda client, url: respuestas.get(url)
+    return lambda client, url: responses.get(url)
 
 
 def test_fetch_prueba_candidatos_hasta_pdf_valido(conn, pdf_dir, monkeypatch):
@@ -74,7 +74,7 @@ def test_fetch_prueba_candidatos_hasta_pdf_valido(conn, pdf_dir, monkeypatch):
     monkeypatch.setattr(pdf_mod, "_download",
                         _fake_download({"http://roto/x.pdf": None, "http://up/x.pdf": b"%PDF-ok"}))
     r = pdf_mod.fetch_pdfs(conn)
-    assert r["descargados"] == 1 and r["fallidos"] == 0
+    assert r["downloaded"] == 1 and r["failed"] == 0
     row = _row(conn, 1)
     assert row["status"] == "fetched"
     assert (pdf_dir / "1.pdf").read_bytes() == b"%PDF-ok"
@@ -84,7 +84,7 @@ def test_fetch_sin_retry_ignora_papers_ya_procesados(conn, pdf_dir, monkeypatch)
     _add_paper(conn, id=1, status="summarized", pdf_url="http://oa/x.pdf")
     monkeypatch.setattr(pdf_mod, "_download", _fake_download({"http://oa/x.pdf": b"%PDF-ok"}))
     r = pdf_mod.fetch_pdfs(conn)
-    assert r["pendientes"] == 0 and _row(conn, 1)["pdf_path"] is None
+    assert r["pending"] == 0 and _row(conn, 1)["pdf_path"] is None
 
 
 def test_retry_descarga_y_resetea_chunks_sin_tocar_status(conn, pdf_dir, monkeypatch):
@@ -92,7 +92,7 @@ def test_retry_descarga_y_resetea_chunks_sin_tocar_status(conn, pdf_dir, monkeyp
     conn.execute("INSERT INTO chunks (paper_id, seq, text) VALUES (1, 0, 'solo abstract')")
     monkeypatch.setattr(pdf_mod, "_download", _fake_download({"http://oa/x.pdf": b"%PDF-ok"}))
     r = pdf_mod.fetch_pdfs(conn, retry=True)
-    assert r["descargados"] == 1
+    assert r["downloaded"] == 1
     row = _row(conn, 1)
     assert row["status"] == "summarized"          # no regresa a 'fetched'
     assert row["pdf_path"] is not None
@@ -105,7 +105,7 @@ def test_retry_no_repite_papers_con_pdf(conn, pdf_dir, monkeypatch):
     _add_paper(conn, id=1, status="summarized", pdf_url="http://oa/x.pdf")
     conn.execute("UPDATE papers SET pdf_path = '/x/1.pdf' WHERE id = 1")
     monkeypatch.setattr(pdf_mod, "_download", _fake_download({}))
-    assert pdf_mod.fetch_pdfs(conn, retry=True)["pendientes"] == 0
+    assert pdf_mod.fetch_pdfs(conn, retry=True)["pending"] == 0
 
 
 def test_fetch_cuenta_sin_url_y_fallidos(conn, pdf_dir, monkeypatch):
@@ -113,4 +113,4 @@ def test_fetch_cuenta_sin_url_y_fallidos(conn, pdf_dir, monkeypatch):
     _add_paper(conn, id=2, pdf_url="http://roto/x.pdf")     # todo falla
     monkeypatch.setattr(pdf_mod, "_download", _fake_download({}))
     r = pdf_mod.fetch_pdfs(conn)
-    assert r == {"descargados": 0, "fallidos": 1, "sin_url": 1, "pendientes": 2}
+    assert r == {"downloaded": 0, "failed": 1, "no_url": 1, "pending": 2}
