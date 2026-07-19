@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, db, llm
+from .. import analyze, db, llm, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -168,6 +168,57 @@ def chat_ask(request: Request, question: str = Form(...)):
     return templates.TemplateResponse(
         request, "_answer.html", {"question": question, "answer": answer, "error": error}
     )
+
+
+# ------------------------------------------------------------- síntesis transversal
+
+@app.get("/synthesis", response_class=HTMLResponse)
+def syntheses_list(request: Request, error: str = ""):
+    conn = db.get_conn()
+    rows = [
+        {**dict(r), "n_papers": len(json.loads(r["paper_ids"]))}
+        for r in synthesize.list_all(conn)
+    ]
+    n_summaries = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+    return templates.TemplateResponse(
+        request, "syntheses.html",
+        {"syntheses": rows, "n_summaries": n_summaries, "job": job,
+         "error": error, "ollama_ok": llm.is_available()},
+    )
+
+
+@app.post("/synthesis")
+def create_synthesis(topic: str = Form(""), limit: int = Form(synthesize.DEFAULT_LIMIT)):
+    topic = topic.strip() or None
+
+    def _job():
+        conn = db.get_conn()
+        _log(f"sintetizando{f' «{topic}»' if topic else ''} (máx. {limit} papers)…")
+        s = synthesize.run(conn, topic=topic, limit=limit)
+        _log(f"síntesis #{s.id} lista: {len(s.sources)} papers comparados")
+
+    if not _run_job("síntesis transversal", _job):
+        return RedirectResponse("/synthesis?error=ya+hay+un+trabajo+en+curso", status_code=303)
+    return RedirectResponse("/synthesis", status_code=303)
+
+
+@app.get("/synthesis/{synthesis_id}", response_class=HTMLResponse)
+def synthesis_detail(request: Request, synthesis_id: int):
+    conn = db.get_conn()
+    s = synthesize.get(conn, synthesis_id)
+    if not s:
+        return RedirectResponse("/synthesis", status_code=303)
+    return templates.TemplateResponse(
+        request, "synthesis.html", {"s": s, "section_labels": synthesize.SECTIONS}
+    )
+
+
+@app.post("/synthesis/{synthesis_id}/delete")
+def delete_synthesis(synthesis_id: int):
+    conn = db.get_conn()
+    conn.execute("DELETE FROM syntheses WHERE id = ?", (synthesis_id,))
+    conn.commit()
+    return RedirectResponse("/synthesis", status_code=303)
 
 
 # ------------------------------------------------------------- búsquedas guardadas

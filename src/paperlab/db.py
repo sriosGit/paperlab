@@ -90,6 +90,15 @@ CREATE TABLE IF NOT EXISTS citations (
     UNIQUE(paper_id, cited_openalex_id)
 );
 
+CREATE TABLE IF NOT EXISTS syntheses (
+    id INTEGER PRIMARY KEY,
+    topic TEXT,                            -- NULL = corpus reciente sin filtrar
+    paper_ids TEXT NOT NULL,               -- JSON: ids en el orden de cita [n]
+    sections TEXT NOT NULL,                -- JSON: panorama, tendencias, contradicciones…
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS saved_searches (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Síntesis — paperlab{% endblock %}
+{% block content %}
+<h1>Síntesis transversal</h1>
+<p class="meta">Compara los resúmenes de varios papers para detectar tendencias, consensos, contradicciones, huecos y aplicaciones viables.</p>
+
+{% if not ollama_ok %}
+<p class="warn">⚠ Ollama no responde — no se pueden generar síntesis hasta que esté disponible.</p>
+{% endif %}
+{% if error %}<p class="warn">⚠ {{ error }}</p>{% endif %}
+
+<h2>Nueva síntesis</h2>
+{% if n_summaries < 2 %}
+<p class="warn">Se necesitan al menos 2 papers con resumen (hay {{ n_summaries }}). Usa «📝 Resumir pendientes» en la Biblioteca.</p>
+{% endif %}
+<form method="post" action="/synthesis" class="stack">
+  <input name="topic" placeholder="Tema de enfoque (vacío = papers resumidos más recientes)">
+  <input name="limit" type="number" value="15" min="2" max="50" title="Máximo de papers a comparar">
+  <button type="submit" {% if job.running or n_summaries < 2 %}disabled{% endif %}>⚗ Sintetizar</button>
+</form>
+<div id="job">{% include "_job.html" %}</div>
+
+<h2>Síntesis guardadas</h2>
+<table>
+  <thead><tr><th>#</th><th>Tema</th><th>Papers</th><th>Modelo</th><th>Fecha</th><th></th></tr></thead>
+  <tbody>
+    {% for s in syntheses %}
+    <tr>
+      <td><a href="/synthesis/{{ s['id'] }}">#{{ s['id'] }}</a></td>
+      <td><a href="/synthesis/{{ s['id'] }}">{{ s['topic'] or '(sin tema)' }}</a></td>
+      <td>{{ s['n_papers'] }}</td>
+      <td>{{ s['model'] }}</td>
+      <td>{{ s['created_at'] }}</td>
+      <td>
+        <form method="post" action="/synthesis/{{ s['id'] }}/delete" style="display:inline"
+              onsubmit="return confirm('¿Borrar esta síntesis?')">
+          <button class="danger">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">Sin síntesis todavía. Genera la primera con el formulario de arriba.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

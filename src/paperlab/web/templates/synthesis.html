@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Síntesis #{{ s.id }} — paperlab{% endblock %}
+{% block content %}
+<p><a href="/synthesis">← Síntesis</a></p>
+<h1>Síntesis #{{ s.id }} <small>{{ s.topic or '(sin tema)' }}</small></h1>
+<p class="meta">{{ s.created_at }} · {{ s.model }} · {{ s.sources | length }} papers comparados</p>
+
+{% for key, label in section_labels %}
+  {% set value = s.sections.get(key) %}
+  {% if value %}
+  <h2>{{ label }}</h2>
+  {% if value is string %}
+  <div>{{ value | markdown | safe }}</div>
+  {% else %}
+  <ul>
+    {% for item in value %}<li>{{ item | markdown | safe }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+{% endfor %}
+
+<h2>Papers comparados</h2>
+<ol>
+  {% for src in s.sources %}
+  <li value="{{ src.n }}"><a href="/paper/{{ src.paper_id }}">{{ src.title }}</a> ({{ src.year or 's.f.' }})</li>
+  {% endfor %}
+</ol>
+{% endblock %}

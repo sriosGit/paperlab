@@ -28,6 +28,8 @@ paperlab fetch-pdfs          # descarga PDFs (arXiv directo; Unpaywall por DOI)
 paperlab process             # extrae texto, trocea, indexa FTS5 y calcula embeddings
 paperlab summarize --limit 5 # resúmenes estructurados con el LLM
 paperlab ask "¿qué métodos usan estos papers?"
+paperlab synthesize "protein folding"   # análisis transversal: compara papers entre sí
+paperlab synthesize --list              # síntesis guardadas; --show N para releer una
 paperlab stats
 ```
 
@@ -40,6 +42,7 @@ paperlab serve               # http://localhost:8000, escucha en 0.0.0.0
 - **Biblioteca**: filtros por texto, fuente, año y estado; botones para procesar/resumir pendientes en background.
 - **Detalle de paper**: abstract, resumen estructurado generado bajo demanda.
 - **Chat**: preguntas al corpus con RAG híbrido (embeddings + FTS5) y citas clicables.
+- **Síntesis**: análisis transversal del corpus — compara los resúmenes de varios papers (por tema o los más recientes) y detecta tendencias, consensos, contradicciones, huecos abiertos, métodos transferibles y aplicaciones viables, todo citado con [n]. Las síntesis quedan guardadas.
 - **Búsquedas guardadas**: temas que se re-ejecutan con un clic (la ejecución automática programada llega en la iteración 2).
 - API REST: `GET /api/papers?q=...` y `POST /api/ask {"question": "..."}`.
 
@@ -82,7 +85,8 @@ fuentes (arXiv, OpenAlex, Unpaywall)
         └─ pdf.py → PDFs → texto (PyMuPDF) → chunks (~800 tokens)
              └─ analyze.py → embeddings (Ollama) como BLOB + índice FTS5
                   ├─ resúmenes estructurados (JSON) por paper
-                  └─ RAG: búsqueda híbrida (coseno numpy + FTS5, fusión RRF) → respuesta con citas
+                  ├─ RAG: búsqueda híbrida (coseno numpy + FTS5, fusión RRF) → respuesta con citas
+                  └─ synthesize.py → síntesis transversal (compara resúmenes entre papers)
 web/ → FastAPI + Jinja2 + HTMX sobre la misma base de datos
 ```
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from . import analyze, config, db, llm
+from . import analyze, config, db, llm, synthesize
 from . import pdf as pdf_mod
 from .ingest import run_search
 
@@ -83,6 +83,53 @@ def ask(question: str, k: int = typer.Option(8, help="Chunks a recuperar")):
         typer.echo("\nFuentes:")
         for s in answer.sources:
             typer.echo(f"  [{s['n']}] {s['title']} ({s['year'] or 's.f.'}) — paper #{s['paper_id']}")
+
+
+def _print_synthesis(s: "synthesize.Synthesis") -> None:
+    for key, label in synthesize.SECTIONS:
+        value = s.sections.get(key)
+        if not value:
+            continue
+        typer.echo(f"\n## {label}")
+        if isinstance(value, str):
+            typer.echo(value)
+        else:
+            for item in value:
+                typer.echo(f"  - {item}")
+    typer.echo("\nPapers comparados:")
+    for src in s.sources:
+        typer.echo(f"  [{src['n']}] {src['title']} ({src['year'] or 's.f.'}) — paper #{src['paper_id']}")
+
+
+@app.command(name="synthesize")
+def synthesize_cmd(
+    topic: str = typer.Argument(None, help="Tema de enfoque (vacío = resumidos más recientes)"),
+    limit: int = typer.Option(synthesize.DEFAULT_LIMIT, help="Máximo de papers a comparar"),
+    show: int = typer.Option(None, help="Mostrar una síntesis guardada por id (no genera)"),
+    list_all: bool = typer.Option(False, "--list", help="Listar síntesis guardadas"),
+):
+    """Análisis transversal: compara papers y detecta tendencias, contradicciones y huecos."""
+    conn = db.get_conn()
+    if list_all:
+        for r in synthesize.list_all(conn):
+            n = len(json.loads(r["paper_ids"]))
+            typer.echo(f"#{r['id']}  {r['created_at']}  {r['topic'] or '(sin tema)'}  — {n} papers")
+        return
+    if show is not None:
+        s = synthesize.get(conn, show)
+        if not s:
+            typer.echo(f"ERROR: no existe la síntesis #{show}", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"Síntesis #{s.id} — {s.topic or '(sin tema)'} — {s.created_at}")
+        _print_synthesis(s)
+        return
+    try:
+        s = synthesize.run(conn, topic=topic, limit=limit)
+    except (llm.OllamaError, ValueError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Síntesis #{s.id} — {s.topic or '(sin tema)'} — {len(s.sources)} papers")
+    _print_synthesis(s)
 
 
 @app.command()
