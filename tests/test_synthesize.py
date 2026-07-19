@@ -95,7 +95,7 @@ def test_run_guarda_y_normaliza(conn, monkeypatch):
     _add_summary(conn, 1)
     _add_summary(conn, 2)
     respuesta = {
-        "panorama": "Campo activo [1][2].",
+        "panorama": ["Campo activo [1][2].", "Crece rápido [1]."],
         "tendencias": ["más datos [1]"],
         "contradicciones": {"raro": "no-lista"},   # el modelo a veces no da lista
         "huecos": ["falta X [2]", {"detalle": "item no-string"}],
@@ -104,7 +104,7 @@ def test_run_guarda_y_normaliza(conn, monkeypatch):
     monkeypatch.setattr(synthesize.llm, "generate_json", lambda *a, **k: respuesta)
     s = synthesize.run(conn, topic="tema")
     assert s.id == 1
-    assert s.sections["panorama"] == "Campo activo [1][2]."
+    assert s.sections["panorama"] == "Campo activo [1][2]. Crece rápido [1]."
     assert s.sections["tendencias"] == ["más datos [1]"]
     assert s.sections["contradicciones"] == ['{"raro": "no-lista"}']
     assert s.sections["huecos"][0] == "falta X [2]"

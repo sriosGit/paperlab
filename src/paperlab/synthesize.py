@@ -157,6 +157,8 @@ def _normalize(data: dict) -> dict:
     for key, _label in SECTIONS:
         value = data.get(key)
         if key == "panorama":
+            if isinstance(value, list):  # el modelo a veces devuelve frases sueltas
+                value = " ".join(str(x) for x in value)
             out[key] = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False) if value else ""
             continue
         if not isinstance(value, list):
