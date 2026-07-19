@@ -43,11 +43,21 @@ paperlab serve               # http://localhost:8000, escucha en 0.0.0.0
 - **Búsquedas guardadas**: temas que se re-ejecutan con un clic (la ejecución automática programada llega en la iteración 2).
 - API REST: `GET /api/papers?q=...` y `POST /api/ask {"question": "..."}`.
 
+## Sin Docker
+
+paperlab no usa contenedores: corre directo con un venv de Python y con Ollama
+instalado de forma nativa en el host (`brew install ollama` o el instalador
+oficial). No hay `Dockerfile` ni `docker-compose.yml` en el repo — si ves
+contenedores corriendo en la máquina (p. ej. otros proyectos), no son parte de
+este stack. `mise.toml` fija Python 3.12 como versión recomendada para el
+venv (`mise install && mise use`), aunque cualquier 3.11+ funciona.
+
 ## Despliegue en la MacBook
 
 1. Clona el repo e instala como arriba (con `mise install` si usas mise).
 2. En `.env` deja `OLLAMA_BASE_URL=http://localhost:11434`.
-3. `paperlab serve` — accesible en la tailnet vía `http://100.83.237.84:8000`.
+3. `paperlab serve` — accesible en la tailnet vía `http://mb-2022:8000` (MagicDNS)
+   o `http://mb-2022.tailad68d1.ts.net:8000` (FQDN completo), sin necesidad de IP.
 4. Para exponerlo a internet con cloudflared:
    ```sh
    cloudflared tunnel --url http://localhost:8000
@@ -56,7 +66,7 @@ paperlab serve               # http://localhost:8000, escucha en 0.0.0.0
 
 > Para desarrollar desde otra máquina de la tailnet usando el Ollama de la Mac,
 > en la Mac ejecuta `launchctl setenv OLLAMA_HOST 0.0.0.0` y reinicia Ollama;
-> en la otra máquina pon `OLLAMA_BASE_URL=http://100.83.237.84:11434` en `.env`.
+> en la otra máquina pon `OLLAMA_BASE_URL=http://mb-2022:11434` en `.env`.
 
 ## Notas de recursos (Mac de 16 GB)
 
