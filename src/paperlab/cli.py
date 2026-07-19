@@ -105,6 +105,7 @@ def _print_synthesis(s: "synthesize.Synthesis") -> None:
 def synthesize_cmd(
     topic: str = typer.Argument(None, help="Tema de enfoque (vacío = resumidos más recientes)"),
     limit: int = typer.Option(synthesize.DEFAULT_LIMIT, help="Máximo de papers a comparar"),
+    full: bool = typer.Option(False, "--full", help="Todo el corpus por lotes (map-reduce); --limit pasa a ser el tamaño de lote"),
     show: int = typer.Option(None, help="Mostrar una síntesis guardada por id (no genera)"),
     list_all: bool = typer.Option(False, "--list", help="Listar síntesis guardadas"),
 ):
@@ -124,7 +125,10 @@ def synthesize_cmd(
         _print_synthesis(s)
         return
     try:
-        s = synthesize.run(conn, topic=topic, limit=limit)
+        if full:
+            s = synthesize.run_full(conn, topic=topic, batch_size=limit, progress=typer.echo)
+        else:
+            s = synthesize.run(conn, topic=topic, limit=limit)
     except (llm.OllamaError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1)

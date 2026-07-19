@@ -15,7 +15,11 @@
 {% endif %}
 <form method="post" action="/synthesis" class="stack">
   <input name="topic" placeholder="Tema de enfoque (vacío = papers resumidos más recientes)">
-  <input name="limit" type="number" value="15" min="2" max="50" title="Máximo de papers a comparar">
+  <input name="limit" type="number" value="15" min="2" max="50"
+         title="Máximo de papers a comparar (con corpus completo: tamaño de lote)">
+  <label title="Analiza TODO el corpus por lotes (map) y combina los análisis (reduce). Tarda varios minutos por lote.">
+    <input type="checkbox" name="full" value="1"> todo el corpus (map-reduce)
+  </label>
   <button type="submit" {% if job.running or n_summaries < 2 %}disabled{% endif %}>⚗ Sintetizar</button>
 </form>
 <div id="job">{% include "_job.html" %}</div>

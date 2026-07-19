@@ -5,10 +5,17 @@ generados (compactos, así el lote cabe en el contexto del modelo local) y le
 pide al LLM una síntesis comparativa: tendencias, consensos, contradicciones,
 huecos abiertos, métodos transferibles y aplicaciones viables, citando cada
 afirmación con [n] igual que el chat RAG.
+
+Para corpus que no caben en una ventana de contexto está el modo map-reduce
+(`run_full`): analiza el corpus por lotes con numeración global de citas
+(map) y combina los análisis parciales en una síntesis final (reduce,
+recursivo si los parciales tampoco caben de una vez).
 """
 
 import json
+import math
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import config, db, llm
@@ -16,6 +23,7 @@ from . import config, db, llm
 DEFAULT_LIMIT = 15
 DOSSIER_BUDGET = 24000  # chars (≈6k tokens): deja sitio a instrucciones y respuesta
 MIN_PAPERS = 2
+REDUCE_GROUP = 6        # análisis parciales por llamada de reducción
 
 SECTIONS = [
     ("panorama", "Panorama"),
@@ -46,6 +54,18 @@ Cada elemento debe citar los papers que lo sustentan con [n]. Si una sección no
 {topic_line}
 PAPERS:
 {dossiers}
+"""
+
+REDUCE_PROMPT = """Combina los siguientes análisis parciales (cada uno cubre un lote distinto de papers del MISMO corpus) en UNA síntesis global. Devuelve SOLO un objeto JSON con las mismas claves y formato que los parciales: "panorama" (string), "tendencias", "consensos", "contradicciones", "huecos", "metodos_transferibles" y "aplicaciones" (listas de strings).
+
+Reglas:
+- Conserva las citas [n] tal cual: cada número identifica un paper concreto y es consistente entre lotes. No renumeres ni inventes citas.
+- Fusiona los puntos duplicados o muy similares sumando sus citas; prioriza los que aparecen en varios lotes.
+- Busca contradicciones también ENTRE lotes: afirmaciones de un lote que choquen con las de otro.
+- Un hueco solo es global si ningún lote lo cubre; descarta los huecos que otro lote resuelve.
+{topic_line}
+ANÁLISIS PARCIALES:
+{partials}
 """
 
 
@@ -103,7 +123,7 @@ def _clip(text: str | None, max_chars: int) -> str:
 
 
 def build_dossiers(
-    conn: sqlite3.Connection, paper_ids: list[int]
+    conn: sqlite3.Connection, paper_ids: list[int], start_n: int = 1
 ) -> tuple[str, list[dict]]:
     """Bloques compactos [n] por paper (desde summaries) + lista de fuentes.
 
@@ -130,7 +150,7 @@ def build_dossiers(
             hallazgos = json.loads(row["findings"] or "[]")
         except json.JSONDecodeError:
             hallazgos = []
-        n = len(sources) + 1
+        n = start_n + len(sources)
         parts = [f"[{n}] {row['title']} ({row['year'] or 's.f.'}{', ' + row['venue'] if row['venue'] else ''})"]
         if row["summary_md"]:
             parts.append(f"Resumen: {_clip(row['summary_md'], 500)}")
@@ -170,23 +190,22 @@ def _normalize(data: dict) -> dict:
     return out
 
 
-def run(
-    conn: sqlite3.Connection, topic: str | None = None, limit: int = DEFAULT_LIMIT
-) -> Synthesis:
-    paper_ids = select_papers(conn, topic, limit)
+def _require_min(paper_ids: list[int], topic: str | None) -> None:
     if len(paper_ids) < MIN_PAPERS:
         raise ValueError(
             "se necesitan al menos 2 papers con resumen"
             + (f" que coincidan con «{topic}»" if topic else "")
             + " — ejecuta antes `paperlab summarize`"
         )
-    dossiers, sources = build_dossiers(conn, paper_ids)
-    topic_line = f"TEMA DE ENFOQUE: {topic}\n" if topic else ""
-    data = llm.generate_json(
-        SYNTHESIS_PROMPT.format(topic_line=topic_line, dossiers=dossiers),
-        system=SYNTHESIS_SYSTEM,
-    )
-    sections = _normalize(data)
+
+
+def _topic_line(topic: str | None) -> str:
+    return f"TEMA DE ENFOQUE: {topic}\n" if topic else ""
+
+
+def _store(
+    conn: sqlite3.Connection, topic: str | None, sources: list[dict], sections: dict
+) -> Synthesis:
     cur = conn.execute(
         "INSERT INTO syntheses (topic, paper_ids, sections, model) VALUES (?, ?, ?, ?)",
         (
@@ -201,6 +220,95 @@ def run(
         id=cur.lastrowid, topic=topic, sections=sections,
         sources=sources, model=config.OLLAMA_MODEL,
     )
+
+
+def run(
+    conn: sqlite3.Connection, topic: str | None = None, limit: int = DEFAULT_LIMIT
+) -> Synthesis:
+    paper_ids = select_papers(conn, topic, limit)
+    _require_min(paper_ids, topic)
+    dossiers, sources = build_dossiers(conn, paper_ids)
+    data = llm.generate_json(
+        SYNTHESIS_PROMPT.format(topic_line=_topic_line(topic), dossiers=dossiers),
+        system=SYNTHESIS_SYSTEM,
+    )
+    return _store(conn, topic, sources, _normalize(data))
+
+
+# ---------------------------------------------------------------- map-reduce
+
+def _reduce(
+    partials: list[dict], topic: str | None, notify: Callable[[str], None]
+) -> dict:
+    """Combina análisis parciales [{first, last, sections}] en rondas hasta dejar uno."""
+    ronda = 0
+    while len(partials) > 1:
+        ronda += 1
+        siguientes: list[dict] = []
+        for i in range(0, len(partials), REDUCE_GROUP):
+            group = partials[i : i + REDUCE_GROUP]
+            if len(group) == 1:
+                siguientes.append(group[0])
+                continue
+            notify(f"reducción (ronda {ronda}): combinando {len(group)} análisis parciales…")
+            blocks = "\n\n".join(
+                f"### Análisis de los papers [{p['first']}]–[{p['last']}]\n"
+                + json.dumps(p["sections"], ensure_ascii=False)
+                for p in group
+            )
+            data = llm.generate_json(
+                REDUCE_PROMPT.format(topic_line=_topic_line(topic), partials=blocks),
+                system=SYNTHESIS_SYSTEM,
+            )
+            siguientes.append(
+                {"first": group[0]["first"], "last": group[-1]["last"],
+                 "sections": _normalize(data)}
+            )
+        partials = siguientes
+    return partials[0]["sections"]
+
+
+def run_full(
+    conn: sqlite3.Connection,
+    topic: str | None = None,
+    batch_size: int = DEFAULT_LIMIT,
+    progress: Callable[[str], None] | None = None,
+) -> Synthesis:
+    """Síntesis map-reduce de TODO el corpus (o de todo lo que coincida con el tema)."""
+    notify = progress or (lambda msg: None)
+    batch_size = max(batch_size, MIN_PAPERS)
+    paper_ids = select_papers(conn, topic, limit=1_000_000)
+    _require_min(paper_ids, topic)
+
+    # reparto parejo: n lotes de tamaño casi igual, sin un último lote minúsculo
+    n_batches = math.ceil(len(paper_ids) / batch_size)
+    base, extra = divmod(len(paper_ids), n_batches)
+    batches: list[list[int]] = []
+    pos = 0
+    for i in range(n_batches):
+        size = base + (1 if i < extra else 0)
+        batches.append(paper_ids[pos : pos + size])
+        pos += size
+
+    sources: list[dict] = []
+    partials: list[dict] = []
+    for i, batch in enumerate(batches, 1):
+        dossiers, batch_sources = build_dossiers(conn, batch, start_n=len(sources) + 1)
+        if not batch_sources:
+            continue
+        sources.extend(batch_sources)
+        notify(f"map {i}/{len(batches)}: analizando papers "
+               f"[{batch_sources[0]['n']}]–[{batch_sources[-1]['n']}]…")
+        data = llm.generate_json(
+            SYNTHESIS_PROMPT.format(topic_line=_topic_line(topic), dossiers=dossiers),
+            system=SYNTHESIS_SYSTEM,
+        )
+        partials.append(
+            {"first": batch_sources[0]["n"], "last": batch_sources[-1]["n"],
+             "sections": _normalize(data)}
+        )
+    sections = _reduce(partials, topic, notify)
+    return _store(conn, topic, sources, sections)
 
 
 # ---------------------------------------------------------------- lectura

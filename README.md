@@ -29,6 +29,7 @@ paperlab process             # extrae texto, trocea, indexa FTS5 y calcula embed
 paperlab summarize --limit 5 # resúmenes estructurados con el LLM
 paperlab ask "¿qué métodos usan estos papers?"
 paperlab synthesize "protein folding"   # análisis transversal: compara papers entre sí
+paperlab synthesize --full              # todo el corpus por lotes (map-reduce); tarda ~2 min por lote
 paperlab synthesize --list              # síntesis guardadas; --show N para releer una
 paperlab stats
 ```
@@ -42,7 +43,7 @@ paperlab serve               # http://localhost:8000, escucha en 0.0.0.0
 - **Biblioteca**: filtros por texto, fuente, año y estado; botones en background para procesar/resumir pendientes, enriquecer con OpenAlex y exportar a Obsidian (este último requiere `OBSIDIAN_VAULT_PATH`).
 - **Detalle de paper**: abstract, resumen estructurado generado bajo demanda.
 - **Chat**: preguntas al corpus con RAG híbrido (embeddings + FTS5) y citas clicables.
-- **Síntesis**: análisis transversal del corpus — compara los resúmenes de varios papers (por tema o los más recientes) y detecta tendencias, consensos, contradicciones, huecos abiertos, métodos transferibles y aplicaciones viables, todo citado con [n]. Las síntesis quedan guardadas.
+- **Síntesis**: análisis transversal del corpus — compara los resúmenes de varios papers (por tema o los más recientes) y detecta tendencias, consensos, contradicciones, huecos abiertos, métodos transferibles y aplicaciones viables, todo citado con [n]. Con «todo el corpus (map-reduce)» analiza el corpus completo por lotes y combina los análisis parciales. Las síntesis quedan guardadas.
 - **Búsquedas guardadas**: temas que se re-ejecutan con un clic (la ejecución automática programada llega en la iteración 2).
 - API REST: `GET /api/papers?q=...` y `POST /api/ask {"question": "..."}`.
 

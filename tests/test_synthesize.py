@@ -123,6 +123,68 @@ def test_run_exige_minimo_de_resumenes(conn):
         synthesize.run(conn)
 
 
+# --- map-reduce ---
+
+def test_run_full_numera_global_y_reduce(conn, monkeypatch):
+    for i in range(1, 7):
+        _add_paper(conn, id=i, title=f"Paper {i}", added_at=f"2024-0{i}-01")
+        _add_summary(conn, i)
+    prompts = []
+
+    def fake(prompt, system=None):
+        prompts.append(prompt)
+        if "ANÁLISIS PARCIALES" in prompt:
+            return {"panorama": "Global [1][6].", "tendencias": ["t global [3]"]}
+        return {"panorama": "Parcial.", "tendencias": ["t parcial"]}
+
+    monkeypatch.setattr(synthesize.llm, "generate_json", fake)
+    s = synthesize.run_full(conn, batch_size=3)
+
+    maps = [p for p in prompts if "ANÁLISIS PARCIALES" not in p]
+    reduces = [p for p in prompts if "ANÁLISIS PARCIALES" in p]
+    assert len(maps) == 2 and len(reduces) == 1
+    assert "[1]" in maps[0] and "[3]" in maps[0] and "[4]" not in maps[0]
+    assert "[4]" in maps[1] and "[6]" in maps[1]          # numeración global
+    assert "papers [1]–[3]" in reduces[0] and "papers [4]–[6]" in reduces[0]
+    assert s.sections["panorama"] == "Global [1][6]."     # gana el resultado del reduce
+    assert [x["n"] for x in s.sources] == [1, 2, 3, 4, 5, 6]
+    assert synthesize.get(conn, s.id).sections == s.sections
+
+
+def test_run_full_un_solo_lote_no_reduce(conn, monkeypatch):
+    for i in range(1, 4):
+        _add_paper(conn, id=i, title=f"Paper {i}")
+        _add_summary(conn, i)
+    prompts = []
+
+    def fake(prompt, system=None):
+        prompts.append(prompt)
+        return {"panorama": "Único lote."}
+
+    monkeypatch.setattr(synthesize.llm, "generate_json", fake)
+    s = synthesize.run_full(conn, batch_size=10)
+    assert len(prompts) == 1 and "ANÁLISIS PARCIALES" not in prompts[0]
+    assert s.sections["panorama"] == "Único lote."
+
+
+def test_reduce_recursivo_agrupa_por_rondas(monkeypatch):
+    llamadas = []
+
+    def fake(prompt, system=None):
+        llamadas.append(prompt)
+        return {"panorama": "combinado"}
+
+    monkeypatch.setattr(synthesize.llm, "generate_json", fake)
+    partials = [
+        {"first": i * 10 + 1, "last": i * 10 + 10, "sections": {"panorama": f"p{i}"}}
+        for i in range(8)
+    ]
+    # 8 parciales con grupos de 6: ronda 1 = [6, 2] → 2 llamadas; ronda 2 = 1 llamada
+    sections = synthesize._reduce(partials, None, lambda m: None)
+    assert len(llamadas) == 3
+    assert sections["panorama"] == "combinado"
+
+
 def test_get_inexistente_y_fuente_borrada(conn, monkeypatch):
     assert synthesize.get(conn, 99) is None
     _add_paper(conn, id=1, title="Uno")

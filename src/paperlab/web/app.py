@@ -239,16 +239,23 @@ def syntheses_list(request: Request, error: str = ""):
 
 
 @app.post("/synthesis")
-def create_synthesis(topic: str = Form(""), limit: int = Form(synthesize.DEFAULT_LIMIT)):
+def create_synthesis(
+    topic: str = Form(""), limit: int = Form(synthesize.DEFAULT_LIMIT), full: str = Form(""),
+):
     topic = topic.strip() or None
 
     def _job():
         conn = db.get_conn()
-        _log(f"sintetizando{f' «{topic}»' if topic else ''} (máx. {limit} papers)…")
-        s = synthesize.run(conn, topic=topic, limit=limit)
+        if full:
+            _log(f"map-reduce del corpus{f' «{topic}»' if topic else ''} (lotes de {limit})…")
+            s = synthesize.run_full(conn, topic=topic, batch_size=limit, progress=_log)
+        else:
+            _log(f"sintetizando{f' «{topic}»' if topic else ''} (máx. {limit} papers)…")
+            s = synthesize.run(conn, topic=topic, limit=limit)
         _log(f"síntesis #{s.id} lista: {len(s.sources)} papers comparados")
 
-    if not _run_job("síntesis transversal", _job):
+    name = "síntesis transversal" + (" (corpus completo)" if full else "")
+    if not _run_job(name, _job):
         return RedirectResponse("/synthesis?error=ya+hay+un+trabajo+en+curso", status_code=303)
     return RedirectResponse("/synthesis", status_code=303)
 
