@@ -50,6 +50,34 @@ def _work_to_paper(w: dict) -> Paper:
     )
 
 
+def _get_work(client: httpx.Client, ref: str) -> dict | None:
+    params = {"mailto": config.CONTACT_EMAIL} if config.CONTACT_EMAIL else {}
+    resp = client.get(f"{API_URL}/{ref}", params=params)
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_by_ids(doi: str | None, arxiv_id: str | None) -> Paper | None:
+    """Busca un work concreto por DOI o arXiv id (para enriquecer papers locales).
+
+    OpenAlex indexa los preprints de arXiv con DOI `10.48550/arXiv.<id>`, así que
+    ese es el camino cuando solo hay arxiv_id.
+    """
+    with httpx.Client(timeout=60, headers={"User-Agent": config.USER_AGENT}) as client:
+        if doi:
+            w = _get_work(client, f"doi:{doi}")
+            if w:
+                return _work_to_paper(w)
+        if arxiv_id:
+            base = arxiv_id.split("v")[0]  # quita el sufijo de versión (v1, v2…)
+            w = _get_work(client, f"doi:10.48550/arXiv.{base}")
+            if w:
+                return _work_to_paper(w)
+    return None
+
+
 def search(query: str, limit: int) -> list[Paper]:
     papers: list[Paper] = []
     params: dict = {"search": query, "per-page": min(PAGE_SIZE, limit)}

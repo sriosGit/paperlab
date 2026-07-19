@@ -101,6 +101,47 @@ def stats():
     typer.echo(f"ollama disponible: {'sí' if llm.is_available() else 'NO'}")
 
 
+@app.command(name="enrich-openalex")
+def enrich_openalex(limit: int = typer.Option(None, help="Máximo de papers a enriquecer")):
+    """Rellena openalex_id y citas de papers que solo tienen DOI/arXiv (densifica el grafo)."""
+    from .ingest import openalex
+    from .ingest.base import store_papers
+
+    conn = db.get_conn()
+    pendientes = conn.execute(
+        """SELECT id, doi, arxiv_id FROM papers
+           WHERE openalex_id IS NULL AND (doi IS NOT NULL OR arxiv_id IS NOT NULL)
+           ORDER BY id"""
+    ).fetchall()
+    if limit:
+        pendientes = pendientes[:limit]
+    if not pendientes:
+        typer.echo("no hay papers con DOI/arXiv pendientes de enriquecer")
+        return
+
+    citas_antes = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    enriquecidos = fallidos = 0
+    for i, row in enumerate(pendientes, 1):
+        try:
+            paper = openalex.fetch_by_ids(row["doi"], row["arxiv_id"])
+        except Exception as exc:  # noqa: BLE001 — un paper no debe tumbar el lote
+            typer.echo(f"[{i}/{len(pendientes)}] paper {row['id']}: ERROR {exc}", err=True)
+            fallidos += 1
+            continue
+        if paper and paper.openalex_id:
+            store_papers(conn, [paper])
+            enriquecidos += 1
+        else:
+            fallidos += 1
+        typer.echo(f"[{i}/{len(pendientes)}] paper {row['id']}: {'ok' if paper else 'sin match'}")
+
+    citas_despues = conn.execute("SELECT COUNT(*) FROM citations").fetchone()[0]
+    typer.echo(
+        f"enriquecidos: {enriquecidos} · sin match/error: {fallidos} · "
+        f"citas nuevas: {citas_despues - citas_antes}"
+    )
+
+
 @app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", help="Interfaz de escucha"),
