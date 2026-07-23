@@ -368,6 +368,32 @@ def searches_ai_run(
     return RedirectResponse(f"/searches?msg={msg}", status_code=303)
 
 
+@app.post("/searches/ai/save")
+def searches_ai_save(
+    query: str = Form(...),
+    sources: list[str] = Form(...),
+    from_year: str = Form(""),
+    to_year: str = Form(""),
+    limit: int = Form(50),
+    name: str = Form(""),
+):
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO saved_searches (name, query, sources, max_results, from_year, to_year) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            name.strip() or query,
+            query,
+            ",".join(sources),
+            limit,
+            int(from_year) if from_year else None,
+            int(to_year) if to_year else None,
+        ),
+    )
+    conn.commit()
+    return RedirectResponse("/searches", status_code=303)
+
+
 @app.post("/searches/{search_id}/run")
 def run_saved_search(search_id: int):
     conn = db.get_conn()
@@ -375,7 +401,13 @@ def run_saved_search(search_id: int):
     if not s:
         return RedirectResponse("/searches", status_code=303)
     result = run_search(
-        conn, s["query"], s["sources"].split(","), s["max_results"], search_id=search_id
+        conn,
+        s["query"],
+        s["sources"].split(","),
+        s["max_results"],
+        search_id=search_id,
+        from_year=s["from_year"],
+        to_year=s["to_year"],
     )
     conn.execute(
         "UPDATE saved_searches SET last_run_at = datetime('now') WHERE id = ?", (search_id,)

@@ -5,7 +5,7 @@
 {% if msg %}<p class="ok">{{ msg }}</p>{% endif %}
 
 <table>
-  <thead><tr><th>Nombre</th><th>Query</th><th>Fuentes</th><th>Máx.</th><th>Última ejecución</th><th></th></tr></thead>
+  <thead><tr><th>Nombre</th><th>Query</th><th>Fuentes</th><th>Máx.</th><th>Años</th><th>Última ejecución</th><th></th></tr></thead>
   <tbody>
     {% for s in searches %}
     <tr>
@@ -13,6 +13,7 @@
       <td><code>{{ s['query'] }}</code></td>
       <td>{{ s['sources'] }}</td>
       <td>{{ s['max_results'] }}</td>
+      <td>{{ s['from_year'] or '…' }}–{{ s['to_year'] or '…' }}</td>
       <td>{{ s['last_run_at'] or 'nunca' }}</td>
       <td>
         <form method="post" action="/searches/{{ s['id'] }}/run" style="display:inline">
@@ -25,7 +26,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6">Sin búsquedas guardadas todavía.</td></tr>
+    <tr><td colspan="7">Sin búsquedas guardadas todavía.</td></tr>
     {% endfor %}
   </tbody>
 </table>

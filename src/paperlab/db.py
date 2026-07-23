@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     query TEXT NOT NULL,
     sources TEXT NOT NULL DEFAULT 'arxiv,openalex',
     max_results INTEGER NOT NULL DEFAULT 50,
+    from_year INTEGER,
+    to_year INTEGER,
     last_run_at TEXT
 );
 
