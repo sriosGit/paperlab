@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, config, db, llm, nas, review, synthesize
+from .. import analyze, config, db, llm, nas, query_builder, review, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -337,6 +337,35 @@ def create_search(
     )
     conn.commit()
     return RedirectResponse("/searches", status_code=303)
+
+
+@app.post("/searches/ai/suggest", response_class=HTMLResponse)
+def searches_ai_suggest(request: Request, ask: str = Form(...)):
+    try:
+        plan, error = query_builder.suggest(ask), None
+    except llm.OllamaError as e:
+        plan, error = None, str(e)
+    return templates.TemplateResponse(
+        request, "_ai_preview.html", {"plan": plan, "error": error}
+    )
+
+
+@app.post("/searches/ai/run")
+def searches_ai_run(
+    query: str = Form(...),
+    sources: list[str] = Form(...),
+    from_year: str = Form(""),
+    to_year: str = Form(""),
+    limit: int = Form(50),
+):
+    conn = db.get_conn()
+    result = run_search(
+        conn, query, sources, limit,
+        from_year=int(from_year) if from_year else None,
+        to_year=int(to_year) if to_year else None,
+    )
+    msg = "; ".join(f"{src}: {info}" for src, info in result.items())
+    return RedirectResponse(f"/searches?msg={msg}", status_code=303)
 
 
 @app.post("/searches/{search_id}/run")

@@ -78,9 +78,18 @@ def fetch_by_ids(doi: str | None, arxiv_id: str | None) -> Paper | None:
     return None
 
 
-def search(query: str, limit: int) -> list[Paper]:
+def search(
+    query: str, limit: int, from_year: int | None = None, to_year: int | None = None
+) -> list[Paper]:
     papers: list[Paper] = []
     params: dict = {"search": query, "per-page": min(PAGE_SIZE, limit)}
+    filters = []
+    if from_year:
+        filters.append(f"from_publication_date:{from_year}-01-01")
+    if to_year:
+        filters.append(f"to_publication_date:{to_year}-12-31")
+    if filters:
+        params["filter"] = ",".join(filters)
     if config.CONTACT_EMAIL:
         params["mailto"] = config.CONTACT_EMAIL
     cursor = "*"

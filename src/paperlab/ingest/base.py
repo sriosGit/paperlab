@@ -80,6 +80,8 @@ def run_search(
     sources: list[str],
     limit: int,
     search_id: int | None = None,
+    from_year: int | None = None,
+    to_year: int | None = None,
 ) -> dict:
     """Ejecuta la búsqueda en cada fuente y guarda resultados. Devuelve conteos."""
     from . import FETCHERS
@@ -91,7 +93,7 @@ def run_search(
             result[source] = {"error": f"fuente desconocida: {source}"}
             continue
         try:
-            papers = fetch(query, limit)
+            papers = fetch(query, limit, from_year=from_year, to_year=to_year)
         except Exception as e:  # noqa: BLE001 — la fuente no debe tumbar el resto
             result[source] = {"error": str(e)}
             continue

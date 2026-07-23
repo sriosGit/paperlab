@@ -1,0 +1,16 @@
+{% if error %}
+<p class="error">⚠ {{ error }}</p>
+{% elif plan %}
+<form method="post" action="/searches/ai/run" class="stack">
+  <label>Query propuesta
+    <input name="query" value="{{ plan.query }}" required>
+  </label>
+  <label><input type="checkbox" name="sources" value="arxiv" {% if 'arxiv' in plan.sources %}checked{% endif %}> arXiv</label>
+  <label><input type="checkbox" name="sources" value="openalex" {% if 'openalex' in plan.sources %}checked{% endif %}> OpenAlex</label>
+  <label>Desde <input name="from_year" type="number" value="{{ plan.from_year or '' }}" style="width:6em"></label>
+  <label>Hasta <input name="to_year" type="number" value="{{ plan.to_year or '' }}" style="width:6em"></label>
+  <label>Máx. resultados por fuente <input name="limit" type="number" value="50" min="1" max="500" style="width:6em"></label>
+  {% if plan.notes %}<p class="meta">{{ plan.notes }}</p>{% endif %}
+  <button type="submit">▶ Ejecutar búsqueda</button>
+</form>
+{% endif %}

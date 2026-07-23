@@ -30,6 +30,15 @@
   </tbody>
 </table>
 
+<h2>🤖 Buscar con IA</h2>
+<p class="meta">Describe qué necesitas en lenguaje natural; el modelo local propone la query y el rango de años, y puedes ajustarlos antes de ejecutar.</p>
+<form hx-post="/searches/ai/suggest" hx-target="#ai-preview" hx-swap="innerHTML" hx-indicator="#ai-spin" class="stack">
+  <input name="ask" placeholder="p. ej. papers sobre implementaciones innovadoras de RAG en los últimos 5 años" required>
+  <button type="submit">✨ Proponer query</button>
+  <span id="ai-spin" class="htmx-indicator">⏳ pensando (puede tardar 1-2 min)…</span>
+</form>
+<div id="ai-preview"></div>
+
 <h2>Nueva búsqueda</h2>
 <form method="post" action="/searches" class="stack">
   <input name="name" placeholder="Nombre (p. ej. AlphaFold y plegado de proteínas)" required>

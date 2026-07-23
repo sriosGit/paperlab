@@ -40,7 +40,14 @@ def _entry_to_paper(entry) -> Paper:
     )
 
 
-def search(query: str, limit: int) -> list[Paper]:
+def search(
+    query: str, limit: int, from_year: int | None = None, to_year: int | None = None
+) -> list[Paper]:
+    search_query = f"all:{query}"
+    if from_year or to_year:
+        start_date = f"{from_year or 1990}01010000"
+        end_date = f"{to_year or 2100}12312359"
+        search_query += f" AND submittedDate:[{start_date} TO {end_date}]"
     papers: list[Paper] = []
     with httpx.Client(timeout=60, headers={"User-Agent": config.USER_AGENT}) as client:
         start = 0
@@ -49,7 +56,7 @@ def search(query: str, limit: int) -> list[Paper]:
             resp = client.get(
                 API_URL,
                 params={
-                    "search_query": f"all:{query}",
+                    "search_query": search_query,
                     "start": start,
                     "max_results": batch,
                     "sortBy": "relevance",

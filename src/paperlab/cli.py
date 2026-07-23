@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from . import analyze, config, db, llm, review, synthesize
+from . import analyze, config, db, llm, query_builder, review, synthesize
 from . import pdf as pdf_mod
 from .ingest import run_search
 
@@ -21,6 +21,34 @@ def search(
     """Busca en las fuentes y guarda los papers en la base de datos."""
     conn = db.get_conn()
     result = run_search(conn, query, source.split(","), limit)
+    for src, info in result.items():
+        typer.echo(f"{src}: {info}")
+
+
+@app.command(name="search-ai")
+def search_ai(
+    request: str,
+    limit: int = typer.Option(50, help="Máximo de resultados por fuente"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Ejecuta sin pedir confirmación"),
+):
+    """Traduce una petición en lenguaje natural a una query óptima (LLM local) y busca."""
+    conn = db.get_conn()
+    try:
+        plan = query_builder.suggest(request)
+    except llm.OllamaError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Query generada: {plan.query}")
+    typer.echo(f"Fuentes: {', '.join(plan.sources)}")
+    if plan.from_year or plan.to_year:
+        typer.echo(f"Rango de años: {plan.from_year or '…'}–{plan.to_year or '…'}")
+    if plan.notes:
+        typer.echo(f"Nota: {plan.notes}")
+    if not yes and not typer.confirm("¿Ejecutar esta búsqueda?", default=True):
+        raise typer.Exit()
+    result = run_search(
+        conn, plan.query, plan.sources, limit, from_year=plan.from_year, to_year=plan.to_year
+    )
     for src, info in result.items():
         typer.echo(f"{src}: {info}")
 
