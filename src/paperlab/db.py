@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS syntheses (
     paper_ids TEXT NOT NULL,               -- JSON: ids en el orden de cita [n]
     sections TEXT NOT NULL,                -- JSON: panorama, tendencias, contradicciones…
     model TEXT NOT NULL,
+    group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -129,6 +130,29 @@ CREATE TABLE IF NOT EXISTS paper_sources (
     UNIQUE(paper_id, query, source)
 );
 CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id);
+
+-- Grupos: espacio persistente que junta búsquedas, papers y sus síntesis.
+CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS group_papers (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    added_via TEXT NOT NULL DEFAULT 'manual',  -- manual | search | citation
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, paper_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_papers_paper ON group_papers(paper_id);
+
+CREATE TABLE IF NOT EXISTS group_searches (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    search_id INTEGER NOT NULL REFERENCES saved_searches(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, search_id)
+);
 """
 # Este esquema es la única fuente de verdad: no hay migraciones. Si una base
 # antigua no lo cumple, bórrala y vuelve a ingerir (`rm data/paperlab.db`).

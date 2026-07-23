@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Síntesis #{{ s.id }} — paperlab{% endblock %}
 {% block content %}
-<p><a href="/synthesis">← Síntesis</a></p>
+<p>
+  {% if s.group_id %}<a href="/groups/{{ s.group_id }}">← Grupo</a> ·{% endif %}
+  <a href="/synthesis">← Síntesis</a>
+</p>
 <h1>Síntesis #{{ s.id }} <small>{{ s.topic or '(sin tema)' }}</small></h1>
 <p class="meta">{{ s.created_at }} · {{ s.model }} · {{ s.sources | length }} papers comparados</p>
 

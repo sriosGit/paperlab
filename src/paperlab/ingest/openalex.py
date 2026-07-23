@@ -78,6 +78,26 @@ def fetch_by_ids(doi: str | None, arxiv_id: str | None) -> Paper | None:
     return None
 
 
+def fetch_by_openalex_ids(ids: list[str]) -> list[Paper]:
+    """Trae varios works por su OpenAlex id (para snowballing de citas).
+
+    En lotes de 50 vía el filtro `openalex_id:A|B|C` — más allá de eso la URL
+    se vuelve poco fiable en algunos proxies/servidores.
+    """
+    papers: list[Paper] = []
+    with httpx.Client(timeout=60, headers={"User-Agent": config.USER_AGENT}) as client:
+        for i in range(0, len(ids), 50):
+            batch = ids[i : i + 50]
+            params: dict = {"filter": "openalex_id:" + "|".join(batch), "per-page": len(batch)}
+            if config.CONTACT_EMAIL:
+                params["mailto"] = config.CONTACT_EMAIL
+            resp = client.get(API_URL, params=params)
+            resp.raise_for_status()
+            for w in resp.json().get("results", []):
+                papers.append(_work_to_paper(w))
+    return papers
+
+
 def search(
     query: str, limit: int, from_year: int | None = None, to_year: int | None = None
 ) -> list[Paper]:

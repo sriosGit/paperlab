@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import analyze, config, db, llm, nas, query_builder, review, synthesize
+from .. import analyze, config, db, groups, llm, nas, query_builder, review, synthesize
 from .. import pdf as pdf_mod
 from ..ingest import run_search
 
@@ -423,6 +423,140 @@ def delete_search(search_id: int):
     conn.execute("DELETE FROM saved_searches WHERE id = ?", (search_id,))
     conn.commit()
     return RedirectResponse("/searches", status_code=303)
+
+
+# ------------------------------------------------------------- grupos
+
+@app.get("/groups", response_class=HTMLResponse)
+def groups_list(request: Request):
+    conn = db.get_conn()
+    return templates.TemplateResponse(
+        request, "groups.html", {"groups": groups.list_all(conn)}
+    )
+
+
+@app.post("/groups")
+def groups_create(name: str = Form(...), description: str = Form("")):
+    conn = db.get_conn()
+    gid = groups.create(conn, name, description)
+    return RedirectResponse(f"/groups/{gid}", status_code=303)
+
+
+@app.get("/groups/{group_id}", response_class=HTMLResponse)
+def group_detail(request: Request, group_id: int):
+    conn = db.get_conn()
+    g = groups.get(conn, group_id)
+    if not g:
+        return RedirectResponse("/groups", status_code=303)
+    linked = groups.linked_searches(conn, group_id)
+    linked_ids = {r["id"] for r in linked}
+    available_searches = [
+        r for r in conn.execute("SELECT * FROM saved_searches ORDER BY name").fetchall()
+        if r["id"] not in linked_ids
+    ]
+    syntheses = synthesize.list_for_group(conn, group_id)
+    contradicted: set[int] = set()
+    if syntheses:
+        latest = synthesize.get(conn, syntheses[0]["id"])
+        if latest:
+            contradicted = synthesize.contradicted_papers(latest)
+    return templates.TemplateResponse(
+        request, "group.html",
+        {"g": g, "linked_searches": linked, "available_searches": available_searches,
+         "members": groups.members(conn, group_id), "contradicted": contradicted,
+         "syntheses": [
+             {**dict(r), "n_papers": len(json.loads(r["paper_ids"]))} for r in syntheses
+         ],
+         "job": job, "ollama_ok": llm.is_available()},
+    )
+
+
+@app.post("/groups/{group_id}/delete")
+def group_delete(group_id: int):
+    groups.delete(db.get_conn(), group_id)
+    return RedirectResponse("/groups", status_code=303)
+
+
+@app.post("/groups/{group_id}/searches")
+def group_link_search(group_id: int, search_id: int = Form(...)):
+    groups.link_search(db.get_conn(), group_id, search_id)
+    return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+
+@app.post("/groups/{group_id}/searches/{search_id}/unlink")
+def group_unlink_search(group_id: int, search_id: int):
+    groups.unlink_search(db.get_conn(), group_id, search_id)
+    return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+
+@app.post("/groups/{group_id}/searches/{search_id}/run")
+def group_run_search(group_id: int, search_id: int):
+    conn = db.get_conn()
+    s = conn.execute("SELECT * FROM saved_searches WHERE id = ?", (search_id,)).fetchone()
+    if s:
+        run_search(
+            conn, s["query"], s["sources"].split(","), s["max_results"],
+            search_id=search_id, from_year=s["from_year"], to_year=s["to_year"],
+        )
+        conn.execute(
+            "UPDATE saved_searches SET last_run_at = datetime('now') WHERE id = ?", (search_id,)
+        )
+        conn.commit()
+        groups.sync_search(conn, search_id)
+    return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+
+@app.post("/groups/{group_id}/papers")
+def group_add_paper(group_id: int, paper_id: int = Form(...)):
+    conn = db.get_conn()
+    if conn.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone():
+        groups.add_paper(conn, group_id, paper_id, added_via="manual")
+    return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+
+@app.post("/groups/{group_id}/papers/{paper_id}/remove")
+def group_remove_paper(group_id: int, paper_id: int):
+    groups.remove_paper(db.get_conn(), group_id, paper_id)
+    return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+
+def _expand_citations(group_id: int):
+    conn = db.get_conn()
+    _log(f"buscando referencias citadas por el grupo #{group_id}…")
+    r = groups.expand_citations(conn, group_id)
+    _log(
+        f"pendientes: {r['pending']} · resueltos en OpenAlex: {r['fetched']} · "
+        f"nuevos en la biblioteca: {r['inserted']} · ya existían: {r['duplicates']}"
+    )
+
+
+def _group_synthesize(group_id: int, topic: str | None, limit: int, full: bool):
+    conn = db.get_conn()
+    if full:
+        _log(f"map-reduce del grupo #{group_id} (lotes de {limit})…")
+        s = synthesize.run_full(conn, topic=topic, batch_size=limit, progress=_log, group_id=group_id)
+    else:
+        _log(f"sintetizando grupo #{group_id} (máx. {limit} papers)…")
+        s = synthesize.run(conn, topic=topic, limit=limit, group_id=group_id)
+    _log(f"síntesis #{s.id} lista: {len(s.sources)} papers comparados")
+
+
+@app.post("/groups/{group_id}/expand-citations", response_class=HTMLResponse)
+def group_start_expand_citations(request: Request, group_id: int):
+    _run_job("buscar referencias citadas", lambda: _expand_citations(group_id))
+    return templates.TemplateResponse(request, "_job.html", {"job": job})
+
+
+@app.post("/groups/{group_id}/synthesize", response_class=HTMLResponse)
+def group_start_synthesize(
+    request: Request, group_id: int,
+    topic: str = Form(""), limit: int = Form(synthesize.DEFAULT_LIMIT), full: str = Form(""),
+):
+    _run_job(
+        "sintetizar grupo",
+        lambda: _group_synthesize(group_id, topic.strip() or None, limit, bool(full)),
+    )
+    return templates.TemplateResponse(request, "_job.html", {"job": job})
 
 
 # ------------------------------------------------------------- trabajos

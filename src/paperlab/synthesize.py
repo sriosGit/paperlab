@@ -79,6 +79,7 @@ class Synthesis:
     sources: list[dict]  # [{n, paper_id, title, year}]
     model: str | None = None
     created_at: str | None = None
+    group_id: int | None = None
     audit: "CitationAudit | None" = None
 
 
@@ -133,39 +134,47 @@ def audit_citations(sections: dict, n_sources: int) -> CitationAudit:
 
 # ---------------------------------------------------------------- selección
 
-def select_papers(conn: sqlite3.Connection, topic: str | None, limit: int) -> list[int]:
+def select_papers(
+    conn: sqlite3.Connection, topic: str | None, limit: int, group_id: int | None = None
+) -> list[int]:
     """Ids de papers CON resumen a comparar, por relevancia al tema o recencia.
 
     Con tema: FTS sobre título/abstract y, si no hay match, sobre el texto
     completo (chunks). Sin tema (o sin matches): los resumidos más recientes.
+    Con `group_id`, todas las ramas se restringen a los miembros del grupo.
     """
+    group_filter = " AND p.id IN (SELECT paper_id FROM group_papers WHERE group_id = ?)"
+    group_args = (group_id,) if group_id is not None else ()
     if topic:
         rows = conn.execute(
-            """SELECT p.id FROM papers_fts f
+            f"""SELECT p.id FROM papers_fts f
                JOIN papers p ON p.id = f.rowid
                JOIN summaries s ON s.paper_id = p.id
                WHERE papers_fts MATCH ? AND p.excluded = 0
+               {group_filter if group_id is not None else ''}
                ORDER BY rank LIMIT ?""",
-            (db.fts_escape(topic), limit),
+            (db.fts_escape(topic), *group_args, limit),
         ).fetchall()
         if not rows:
             rows = conn.execute(
-                """SELECT c.paper_id AS id, MIN(rank) AS best
+                f"""SELECT c.paper_id AS id, MIN(rank) AS best
                    FROM chunks_fts f
                    JOIN chunks c ON c.id = f.rowid
                    JOIN summaries s ON s.paper_id = c.paper_id
                    JOIN papers p ON p.id = c.paper_id
                    WHERE chunks_fts MATCH ? AND p.excluded = 0
+                   {group_filter if group_id is not None else ''}
                    GROUP BY c.paper_id ORDER BY best LIMIT ?""",
-                (db.fts_escape(topic), limit),
+                (db.fts_escape(topic), *group_args, limit),
             ).fetchall()
         return [r["id"] for r in rows]
     rows = conn.execute(
-        """SELECT s.paper_id AS id FROM summaries s
+        f"""SELECT s.paper_id AS id FROM summaries s
            JOIN papers p ON p.id = s.paper_id
            WHERE p.excluded = 0
+           {group_filter if group_id is not None else ''}
            ORDER BY p.added_at DESC, p.id DESC LIMIT ?""",
-        (limit,),
+        (*group_args, limit),
     ).fetchall()
     return [r["id"] for r in rows]
 
@@ -259,36 +268,44 @@ def _topic_line(topic: str | None) -> str:
 
 
 def _store(
-    conn: sqlite3.Connection, topic: str | None, sources: list[dict], sections: dict
+    conn: sqlite3.Connection,
+    topic: str | None,
+    sources: list[dict],
+    sections: dict,
+    group_id: int | None = None,
 ) -> Synthesis:
     cur = conn.execute(
-        "INSERT INTO syntheses (topic, paper_ids, sections, model) VALUES (?, ?, ?, ?)",
+        "INSERT INTO syntheses (topic, paper_ids, sections, model, group_id) VALUES (?, ?, ?, ?, ?)",
         (
             topic,
             json.dumps([s["paper_id"] for s in sources]),
             json.dumps(sections, ensure_ascii=False),
             config.OLLAMA_MODEL,
+            group_id,
         ),
     )
     conn.commit()
     return Synthesis(
         id=cur.lastrowid, topic=topic, sections=sections,
-        sources=sources, model=config.OLLAMA_MODEL,
+        sources=sources, model=config.OLLAMA_MODEL, group_id=group_id,
         audit=audit_citations(sections, len(sources)),
     )
 
 
 def run(
-    conn: sqlite3.Connection, topic: str | None = None, limit: int = DEFAULT_LIMIT
+    conn: sqlite3.Connection,
+    topic: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    group_id: int | None = None,
 ) -> Synthesis:
-    paper_ids = select_papers(conn, topic, limit)
+    paper_ids = select_papers(conn, topic, limit, group_id=group_id)
     _require_min(paper_ids, topic)
     dossiers, sources = build_dossiers(conn, paper_ids)
     data = llm.generate_json(
         SYNTHESIS_PROMPT.format(topic_line=_topic_line(topic), dossiers=dossiers),
         system=SYNTHESIS_SYSTEM,
     )
-    return _store(conn, topic, sources, _normalize(data))
+    return _store(conn, topic, sources, _normalize(data), group_id=group_id)
 
 
 # ---------------------------------------------------------------- map-reduce
@@ -329,11 +346,12 @@ def run_full(
     topic: str | None = None,
     batch_size: int = DEFAULT_LIMIT,
     progress: Callable[[str], None] | None = None,
+    group_id: int | None = None,
 ) -> Synthesis:
     """Síntesis map-reduce de TODO el corpus (o de todo lo que coincida con el tema)."""
     notify = progress or (lambda msg: None)
     batch_size = max(batch_size, MIN_PAPERS)
-    paper_ids = select_papers(conn, topic, limit=1_000_000)
+    paper_ids = select_papers(conn, topic, limit=1_000_000, group_id=group_id)
     _require_min(paper_ids, topic)
 
     # reparto parejo: n lotes de tamaño casi igual, sin un último lote minúsculo
@@ -364,7 +382,7 @@ def run_full(
              "sections": _normalize(data)}
         )
     sections = _reduce(partials, topic, notify)
-    return _store(conn, topic, sources, sections)
+    return _store(conn, topic, sources, sections, group_id=group_id)
 
 
 # ---------------------------------------------------------------- lectura
@@ -395,13 +413,28 @@ def get(conn: sqlite3.Connection, synthesis_id: int) -> Synthesis | None:
     return Synthesis(
         id=row["id"], topic=row["topic"], sections=sections,
         sources=_sources_for(conn, paper_ids), model=row["model"],
-        created_at=row["created_at"],
+        created_at=row["created_at"], group_id=row["group_id"],
         audit=audit_citations(sections, len(paper_ids)),
     )
 
 
 def list_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT id, topic, paper_ids, model, created_at
+        """SELECT id, topic, paper_ids, model, created_at, group_id
            FROM syntheses ORDER BY id DESC"""
     ).fetchall()
+
+
+def list_for_group(conn: sqlite3.Connection, group_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT id, topic, paper_ids, model, created_at, group_id
+           FROM syntheses WHERE group_id = ? ORDER BY id DESC""",
+        (group_id,),
+    ).fetchall()
+
+
+def contradicted_papers(synthesis: Synthesis) -> set[int]:
+    """Ids de papers citados en la sección "contradicciones" de la síntesis."""
+    by_n = {s["n"]: s["paper_id"] for s in synthesis.sources}
+    text = json.dumps(synthesis.sections.get("contradicciones") or [], ensure_ascii=False)
+    return {by_n[n] for n in (int(m) for m in _CITA.findall(text)) if n in by_n}

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from . import analyze, config, db, llm, query_builder, review, synthesize
+from . import analyze, config, db, groups, llm, query_builder, review, synthesize
 from . import pdf as pdf_mod
 from .ingest import run_search
 
@@ -385,6 +385,77 @@ def sync_nas(
         f"subidos: {r['uploaded']} · ya en NAS: {r['already_on_nas']} · "
         f"recuperados: {r['restored']} · perdidos: {r['missing']}"
     )
+
+
+group_app = typer.Typer(help="Grupos: junta búsquedas, papers y sus síntesis en un mismo espacio.")
+app.add_typer(group_app, name="group")
+
+
+@group_app.command(name="create")
+def group_create(name: str, description: str = typer.Option("", help="Descripción opcional")):
+    """Crea un grupo."""
+    conn = db.get_conn()
+    gid = groups.create(conn, name, description)
+    typer.echo(f"grupo #{gid} creado: {name}")
+
+
+@group_app.command(name="list")
+def group_list():
+    """Lista los grupos."""
+    for g in groups.list_all(db.get_conn()):
+        typer.echo(f"#{g['id']}  {g['name']}  — {g['n_papers']} papers, {g['n_searches']} búsquedas ligadas")
+
+
+@group_app.command(name="link-search")
+def group_link_search(group_id: int, search_id: int):
+    """Liga una búsqueda guardada a un grupo (y sincroniza sus papers ya traídos)."""
+    conn = db.get_conn()
+    groups.link_search(conn, group_id, search_id)
+    typer.echo(f"búsqueda #{search_id} ligada al grupo #{group_id}")
+
+
+@group_app.command(name="add-paper")
+def group_add_paper(group_id: int, paper_id: int):
+    """Añade un paper suelto a un grupo."""
+    conn = db.get_conn()
+    groups.add_paper(conn, group_id, paper_id, added_via="manual")
+    typer.echo(f"paper #{paper_id} añadido al grupo #{group_id}")
+
+
+@group_app.command(name="expand-citations")
+def group_expand_citations(
+    group_id: int, limit: int = typer.Option(200, help="Máximo de citas a resolver")
+):
+    """Trae al corpus los papers citados por los del grupo (snowballing)."""
+    conn = db.get_conn()
+    r = groups.expand_citations(conn, group_id, limit=limit)
+    typer.echo(
+        f"pendientes: {r['pending']} · resueltos en OpenAlex: {r['fetched']} · "
+        f"nuevos en la biblioteca: {r['inserted']} · ya existían: {r['duplicates']}"
+    )
+
+
+@group_app.command(name="synthesize")
+def group_synthesize(
+    group_id: int,
+    topic: str = typer.Option(None, help="Tema de enfoque dentro del grupo"),
+    limit: int = typer.Option(synthesize.DEFAULT_LIMIT, help="Máximo de papers a comparar"),
+    full: bool = typer.Option(False, "--full", help="Todo el grupo por lotes (map-reduce)"),
+):
+    """Sintetiza los papers de un grupo (tendencias, contradicciones, huecos…)."""
+    conn = db.get_conn()
+    try:
+        if full:
+            s = synthesize.run_full(
+                conn, topic=topic, batch_size=limit, progress=typer.echo, group_id=group_id
+            )
+        else:
+            s = synthesize.run(conn, topic=topic, limit=limit, group_id=group_id)
+    except (llm.OllamaError, ValueError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Síntesis #{s.id} — {len(s.sources)} papers")
+    _print_synthesis(s)
 
 
 @app.command()

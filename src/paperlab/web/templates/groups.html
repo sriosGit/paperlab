@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Grupos — paperlab{% endblock %}
+{% block content %}
+<h1>Grupos</h1>
+<p class="meta">Un grupo junta búsquedas guardadas, papers (a mano o citados por otros del grupo) y sus síntesis en un solo espacio.</p>
+
+<table>
+  <thead><tr><th>Nombre</th><th>Descripción</th><th>Búsquedas</th><th>Papers</th><th></th></tr></thead>
+  <tbody>
+    {% for g in groups %}
+    <tr>
+      <td><a href="/groups/{{ g['id'] }}">{{ g['name'] }}</a></td>
+      <td class="meta">{{ g['description'] or '—' }}</td>
+      <td>{{ g['n_searches'] }}</td>
+      <td>{{ g['n_papers'] }}</td>
+      <td>
+        <form method="post" action="/groups/{{ g['id'] }}/delete" style="display:inline"
+              onsubmit="return confirm('¿Borrar este grupo? (los papers y búsquedas siguen existiendo, solo se deshace la agrupación)')">
+          <button class="danger">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">Sin grupos todavía.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Nuevo grupo</h2>
+<form method="post" action="/groups" class="stack">
+  <input name="name" placeholder="Nombre (p. ej. RAG en dominios médicos)" required>
+  <input name="description" placeholder="Descripción (opcional)">
+  <button type="submit">Crear</button>
+</form>
+{% endblock %}

@@ -26,12 +26,13 @@
 
 <h2>Síntesis guardadas</h2>
 <table>
-  <thead><tr><th>#</th><th>Tema</th><th>Papers</th><th>Modelo</th><th>Fecha</th><th></th></tr></thead>
+  <thead><tr><th>#</th><th>Tema</th><th>Grupo</th><th>Papers</th><th>Modelo</th><th>Fecha</th><th></th></tr></thead>
   <tbody>
     {% for s in syntheses %}
     <tr>
       <td><a href="/synthesis/{{ s['id'] }}">#{{ s['id'] }}</a></td>
       <td><a href="/synthesis/{{ s['id'] }}">{{ s['topic'] or '(sin tema)' }}</a></td>
+      <td>{% if s['group_id'] %}<a href="/groups/{{ s['group_id'] }}">grupo #{{ s['group_id'] }}</a>{% else %}—{% endif %}</td>
       <td>{{ s['n_papers'] }}</td>
       <td>{{ s['model'] }}</td>
       <td>{{ s['created_at'] }}</td>
@@ -43,7 +44,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6">Sin síntesis todavía. Genera la primera con el formulario de arriba.</td></tr>
+    <tr><td colspan="7">Sin síntesis todavía. Genera la primera con el formulario de arriba.</td></tr>
     {% endfor %}
   </tbody>
 </table>
